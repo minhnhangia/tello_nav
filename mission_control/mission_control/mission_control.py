@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
 from enum import Enum
 import time
 
@@ -26,17 +27,13 @@ class MissionControl(Node):
         super().__init__('mission_control')
 
         # === Parameters ===
-        self.declare_parameters(
-            namespace='',
-            parameters=[
-                ('yaw_speed', 50),
-                ('move_speed', 20),
-                ('corner_tof_threshold_mm', 900.0),
-                ('headon_tof_threshold_mm', 500.0),
-                ('altitude_check_interval_s', 120.0),
-                ('altitude_lower_step_cm', 20),
-                ('initial_search_height_cm', 60.0)
-            ])
+        self.declare_parameter('yaw_speed', 50.0)
+        self.declare_parameter('move_speed', 0.0)
+        self.declare_parameter('corner_tof_threshold_mm', 900.0)
+        self.declare_parameter('headon_tof_threshold_mm', 500.0)
+        self.declare_parameter('altitude_check_interval_s', 120.0)
+        self.declare_parameter('altitude_lower_step_cm', 20)
+        self.declare_parameter('initial_search_height_cm', 60.0)
         
         # Assign parameters to member variables for easy access
         self.YAW_SPEED = self.get_parameter('yaw_speed').value
@@ -55,12 +52,19 @@ class MissionControl(Node):
         self.time_search_started = self.get_clock().now()
 
         # === ROS2 Communications ===
-        self.cmd_vel_pub = self.create_publisher(Twist, '/tello1/cmd_vel', 10)
+        qos_profile = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+
+        self.cmd_vel_pub = self.create_publisher(Twist, '/tello1/cmd_vel', 1)
         
         # self.tof_sub = self.create_subscription(
         #     Range, '/tello1/tof', self.tof_callback, 10)
         self.depth_sub = self.create_subscription(
-            DepthMapAnalysis, '/tello1/depth/analysis', self.depth_analysis_callback, 10)
+            DepthMapAnalysis, '/tello1/depth/analysis', self.depth_analysis_callback, qos_profile)
         # self.flight_data_sub = self.create_subscription(
         #     FlightData, '/tello1/flight_data', self.flight_data_callback, 10)
 
@@ -86,7 +90,7 @@ class MissionControl(Node):
     def execute_tello_action(self, command: str):
         """Asynchronously calls a Tello action and manages state."""
         if self.mission_state == MissionState.EXECUTING_ACTION:
-            self.get_logger().warn(f"Already executing an action, ignoring command: '{command}'")
+            self.get_logger().warning(f"Already executing an action, ignoring command: '{command}'")
             return
 
         self.mission_state = MissionState.EXECUTING_ACTION
@@ -136,17 +140,17 @@ class MissionControl(Node):
 
         # 1. ToF Error Check
         # if self.latest_tof_mm > 8000.0:
-        #     self.get_logger().warn("ToF out of range or error. Hovering.")
+        #     self.get_logger().warning("ToF out of range or error. Hovering.")
         #     self.cmd_vel_pub.publish(twist_msg)
         #     return
         
         # 2. Obstacle Ahead (Depth Map)
         if depth.middle_center.red > depth.middle_center.blue:
             if depth.middle_left.blue > depth.middle_right.blue:
-                self.get_logger().info("Obstacle detected. Turning Left.")
+                self.get_logger().warning("Obstacle detected. Turning Left.")
                 twist_msg.angular.z = -self.YAW_SPEED
             else:
-                self.get_logger().info("Obstacle detected. Turning Right.")
+                self.get_logger().warning("Obstacle detected. Turning Right.")
                 twist_msg.angular.z = self.YAW_SPEED
             self.cmd_vel_pub.publish(twist_msg)
         
