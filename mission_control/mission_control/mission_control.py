@@ -11,7 +11,7 @@ import numpy as np
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Range
 from midas_msgs.msg import DepthMapAnalysis
-from tello_msgs.msg import FlightData
+from tello_msgs.msg import FlightData, TelloResponse
 from aruco_opencv_msgs.msg import ArucoDetection
 from tello_msgs.srv import TelloAction
 
@@ -32,10 +32,20 @@ class MissionControl(Node):
     def __init__(self):
         super().__init__('mission_control')
 
+        # === Initialization ===
+        self.set_all_params()
+        self.set_pubs_subs()
+        self.set_service_clients()
+
+        # === Main Logic Timer ===
+        self.timer = self.create_timer(0.25, self.main_logic_loop) # 4 Hz loop
+        self.get_logger().info("Mission Control Node has started! Current state: SEARCHING")
+
+    def set_all_params(self):
         # === Parameters ===
         # SEARCHING state parameters
         self.declare_parameter('yaw_speed', 50.0)
-        self.declare_parameter('move_speed', 0.0)
+        self.declare_parameter('move_speed', 20.0)
         self.declare_parameter('corner_tof_threshold_mm', 900.0)
         self.declare_parameter('headon_tof_threshold_mm', 500.0)
         self.declare_parameter('altitude_check_interval_s', 120.0)
@@ -71,6 +81,12 @@ class MissionControl(Node):
         self.locked_on_marker_id = -1
         self.locked_on_marker_pose = None
 
+        # Track the state to transition to after current action completes
+        self.pending_next_state = None
+        self.action_start_time = None
+        self.ACTION_TIMEOUT_SEC = 10.0  # Maximum time to wait for action completion
+
+    def set_pubs_subs(self):
         # === ROS2 Communications ===
         qos_profile = QoSProfile(
             reliability=QoSReliabilityPolicy.BEST_EFFORT,
@@ -85,7 +101,10 @@ class MissionControl(Node):
         self.depth_sub = self.create_subscription(DepthMapAnalysis, '/tello1/depth/analysis', self.depth_analysis_callback, qos_profile)
         self.flight_data_sub = self.create_subscription(FlightData, '/tello1/flight_data', self.flight_data_callback, 10)
         # self.aruco_sub = self.create_subscription(ArucoDetection, '/aruco_detections', self.aruco_callback, 10)
+        # Subscribe to tello_response to know when commands actually complete
+        self.tello_response_sub = self.create_subscription(TelloResponse, '/tello1/tello_response', self.tello_response_callback, 10)
 
+    def set_service_clients(self):
         # Service Clients
         self.action_client = self.create_client(TelloAction, '/tello1/tello_action')
         while not self.action_client.wait_for_service(timeout_sec=1.0):
@@ -94,10 +113,6 @@ class MissionControl(Node):
         # self.marker_lock_client = self.create_client(MarkerLock, '/tello1/request_marker_lock')
         # while not self.marker_lock_client.wait_for_service(timeout_sec=1.0):
         #     self.get_logger().info('Marker Lock service not available, waiting...')
-
-        # === Main Logic Timer ===
-        self.timer = self.create_timer(0.25, self.main_logic_loop) # 4 Hz loop
-        self.get_logger().info("Mission Control Node has started! Current state: SEARCHING")
 
     # --- Subscriber Callbacks ---
     def tof_callback(self, msg : Range):
@@ -108,6 +123,20 @@ class MissionControl(Node):
 
     def flight_data_callback(self, msg : FlightData):
         self.latest_height_cm = float(msg.tof)  # height measured by ToF in cm
+
+    def tello_response_callback(self, msg : TelloResponse):
+        """Called when a Tello command actually completes (not just accepted)"""
+        if self.mission_state == MissionState.EXECUTING_ACTION and self.pending_next_state is not None:
+            if msg.rc == TelloResponse.OK:
+                self.get_logger().info(f"Command completed successfully: '{msg.str}'. Transitioning to {self.pending_next_state.name}.")
+                self.mission_state = self.pending_next_state
+            else:
+                self.get_logger().error(f"Command failed: '{msg.str}'. Returning to SEARCHING.")
+                self.mission_state = MissionState.SEARCHING
+            
+            # Clear the pending state and timer
+            self.pending_next_state = None
+            self.action_start_time = None
 
     # def aruco_callback(self, msg : ArucoDetection):
     #     # Only try to lock on if we are currently searching
@@ -124,68 +153,95 @@ class MissionControl(Node):
     #             self.mission_state = MissionState.SEARCHING # Go back to searching
 
     # --- Service Call Logic ---
-    def request_marker_lock(self, marker_id):
-        req = MarkerLock.Request()
-        req.marker_id = marker_id
-        future = self.marker_lock_client.call_async(req)
-        future.add_done_callback(self.marker_lock_response_callback)
+    # def request_marker_lock(self, marker_id):
+    #     req = MarkerLock.Request()
+    #     req.marker_id = marker_id
+    #     future = self.marker_lock_client.call_async(req)
+    #     future.add_done_callback(self.marker_lock_response_callback)
 
-    def marker_lock_response_callback(self, future):
-        try:
-            response = future.result()
-            if response.success:
-                self.locked_on_marker_id = future.request.marker_id
-                self.get_logger().info(f"Successfully locked on to marker {self.locked_on_marker_id}. Transitioning to CENTERING.")
-                self.mission_state = MissionState.CENTERING
-            else:
-                self.get_logger().info(f"Marker {future.request.marker_id} is not available. Resuming SEARCHING.")
-                self.mission_state = MissionState.SEARCHING
-        except Exception as e:
-            self.get_logger().error(f'Marker lock service call failed: {e}')
-            self.mission_state = MissionState.SEARCHING
+    # def marker_lock_response_callback(self, future):
+    #     try:
+    #         response = future.result()
+    #         if response.success:
+    #             self.locked_on_marker_id = future.request.marker_id
+    #             self.get_logger().info(f"Successfully locked on to marker {self.locked_on_marker_id}. Transitioning to CENTERING.")
+    #             self.mission_state = MissionState.CENTERING
+    #         else:
+    #             self.get_logger().info(f"Marker {future.request.marker_id} is not available. Resuming SEARCHING.")
+    #             self.mission_state = MissionState.SEARCHING
+    #     except Exception as e:
+    #         self.get_logger().error(f'Marker lock service call failed: {e}')
+    #         self.mission_state = MissionState.SEARCHING
 
     def execute_tello_action(self, command: str, next_state_on_success: MissionState):
         if self.mission_state == MissionState.EXECUTING_ACTION: 
             return
         
-        self.mission_state = MissionState.EXECUTING_ACTION
-        self.get_logger().info(f'Executing discrete action: "{command}"')
+        if not self.action_client.service_is_ready():
+            self.get_logger().error("Cannot execute action: Tello service not available")
+            return
+        
+        # Store the state to transition to when the action completes
+        self.pending_next_state = next_state_on_success
+        self.get_logger().info(f'Requesting action: "{command}"')
         
         req = TelloAction.Request()
         req.cmd = command
-        
         future = self.action_client.call_async(req)
-        future.add_done_callback(lambda f: self.action_done_callback(f, next_state_on_success))
+        future.add_done_callback(self.action_acceptance_callback)
 
-    def action_done_callback(self, future, next_state):
-        # Callback to transition state after a discrete move is complete
+    def action_acceptance_callback(self, future):
+        """Called when TelloAction service responds (command accepted/rejected, NOT completed)"""
         try:
             response = future.result()
             if response.rc == TelloAction.Response.OK:
-                self.get_logger().info(f"Action successful. Transitioning to {next_state.name}.")
-                self.mission_state = next_state
+                self.get_logger().info("Command accepted by Tello. Entering EXECUTING_ACTION state.")
+                self.mission_state = MissionState.EXECUTING_ACTION
+                self.action_start_time = self.get_clock().now()
             else:
-                self.get_logger().error("Action failed. Returning to SEARCHING.")
+                # Command was rejected - provide detailed error information
+                error_codes = {
+                    1: "OK",
+                    2: "ERROR_NOT_CONNECTED - Drone not connected or not sending telemetry/video",
+                    3: "ERROR_BUSY - Previous command still executing"
+                }
+                error_msg = error_codes.get(response.rc, f"Unknown error code: {response.rc}")
+                self.get_logger().error(f"Command rejected with code {response.rc}: {error_msg}")
                 self.mission_state = MissionState.SEARCHING
+                self.pending_next_state = None
         except Exception as e:
             self.get_logger().error(f'Service call failed: {e}')
             self.mission_state = MissionState.SEARCHING
+            self.pending_next_state = None
 
     # --- Main Control Loop & State Logic ---
     def main_logic_loop(self):
         # State machine dispatcher
+
+        # If the drone is executing a discrete action, check for timeout
+        if self.mission_state == MissionState.EXECUTING_ACTION:
+            if self.action_start_time is not None:
+                elapsed = (self.get_clock().now() - self.action_start_time).nanoseconds / 1e9
+                if elapsed > self.ACTION_TIMEOUT_SEC:
+                    self.get_logger().error(f"Action timed out after {elapsed:.1f}s. Returning to SEARCHING.")
+                    self.mission_state = MissionState.SEARCHING
+                    self.pending_next_state = None
+                    self.action_start_time = None
+            return
+
+        # If we are waiting for the marker server, HOVER.
+        if self.mission_state == MissionState.LOCKING_ON:
+            self.cmd_vel_pub.publish(Twist())
+            return
+        
         if self.mission_state == MissionState.SEARCHING:
             self.run_searching_logic()
-        elif self.mission_state == MissionState.CENTERING:
+        # elif self.mission_state == MissionState.CENTERING:
         #     self.run_centering_logic()
         # elif self.mission_state == MissionState.APPROACHING:
         #     self.run_approaching_logic()
         # elif self.mission_state == MissionState.LANDING:
-            self.execute_tello_action("land", MissionState.LANDING) # Stay in landing state
-        
-        # Hover if waiting for a service call to complete (locking on or executing action)
-        if self.mission_state in [MissionState.LOCKING_ON, MissionState.EXECUTING_ACTION]:
-            self.cmd_vel_pub.publish(Twist())
+            # self.execute_tello_action("land", MissionState.LANDING) # Stay in landing state
 
     def run_searching_logic(self):
         # Wait until all necessary sensor data is available
@@ -211,9 +267,11 @@ class MissionControl(Node):
             if depth.middle_left.blue > depth.middle_right.blue:
                 self.get_logger().warning("Obstacle detected. Turning Left.")
                 twist_msg.angular.z = -self.YAW_SPEED
+                # self.execute_tello_action('ccw 90', MissionState.SEARCHING)
             else:
                 self.get_logger().warning("Obstacle detected. Turning Right.")
                 twist_msg.angular.z = self.YAW_SPEED
+                # self.execute_tello_action('cw 90', MissionState.SEARCHING)
             self.cmd_vel_pub.publish(twist_msg)
         
         # # 3. Corner Avoidance (Depth Clear + ToF Close)
