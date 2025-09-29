@@ -51,8 +51,8 @@ class MissionControl(Node):
         self.declare_parameter('altitude_lower_step_cm', 20)
         self.declare_parameter('initial_search_height_cm', 60.0)
         # APPROACHING state parameters
-        self.declare_parameter('centering_threshold_x', 0.03) # 3cm horizontal tolerance
-        self.declare_parameter('centering_yaw_kp', 20.0) # Proportional gain for yaw control
+        self.declare_parameter('centering_threshold_x', 0.15) # horizontal tolerance
+        self.declare_parameter('centering_yaw_kp', 30.0) # Proportional gain for yaw control during centering
         self.declare_parameter('final_approach_dist_cm', 500.0)
         self.declare_parameter('step_approach_dist_cm', 100.0)
         self.declare_parameter('final_approach_offset_cm', 20.0)
