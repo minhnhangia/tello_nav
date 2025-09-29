@@ -27,7 +27,6 @@ class MissionState(Enum):
 class MissionControl(Node):
     """
     The central 'brain' node for the Tello drone's autonomous mission.
-    This implementation covers the SEARCHING state logic.
     """
     def __init__(self):
         super().__init__('mission_control')
@@ -52,8 +51,8 @@ class MissionControl(Node):
         self.declare_parameter('altitude_lower_step_cm', 20)
         self.declare_parameter('initial_search_height_cm', 60.0)
         # APPROACHING state parameters
-        self.declare_parameter('centering_threshold_y', 0.03) # 3cm horizontal tolerance
-        self.declare_parameter('centering_yaw_kp', 2.0) # Proportional gain for yaw control
+        self.declare_parameter('centering_threshold_x', 0.03) # 3cm horizontal tolerance
+        self.declare_parameter('centering_yaw_kp', 20.0) # Proportional gain for yaw control
         self.declare_parameter('final_approach_dist_cm', 500.0)
         self.declare_parameter('step_approach_dist_cm', 100.0)
         self.declare_parameter('final_approach_offset_cm', 20.0)
@@ -66,7 +65,7 @@ class MissionControl(Node):
         self.ALTITUDE_CHECK_INTERVAL = self.get_parameter('altitude_check_interval_s').value
         self.ALTITUDE_LOWER_STEP = self.get_parameter('altitude_lower_step_cm').value
         self.INITIAL_SEARCH_HEIGHT = self.get_parameter('initial_search_height_cm').value
-        self.CENTERING_THRESHOLD_Y = self.get_parameter('centering_threshold_y').value
+        self.CENTERING_THRESHOLD_X = self.get_parameter('centering_threshold_x').value
         self.CENTERING_YAW_KP = self.get_parameter('centering_yaw_kp').value
         self.FINAL_APPROACH_DIST = self.get_parameter('final_approach_dist_cm').value
         self.STEP_APPROACH_DIST = self.get_parameter('step_approach_dist_cm').value
@@ -138,21 +137,40 @@ class MissionControl(Node):
             self.pending_next_state = None
             self.action_start_time = None
 
-    # def aruco_callback(self, msg : ArucoDetection):
-    #     # Only try to lock on if we are currently searching
-    #     if self.mission_state == MissionState.SEARCHING and len(msg.markers) > 0:
-    #         self.mission_state = MissionState.LOCKING_ON
-    #         try:
-    #             first_marker = msg.markers[0]
-    #             detected_id = first_marker.id
-    #             self.locked_on_marker_pose = first_marker.pose # Store the pose
-    #             self.get_logger().info(f"Marker {detected_id} detected. Attempting to lock on...")
-    #             self.request_marker_lock(detected_id)
-    #         except Exception as e:
-    #             self.get_logger().error(f"Error processing ArUco detection message: {e}")
-    #             self.mission_state = MissionState.SEARCHING # Go back to searching
+    def aruco_callback(self, msg: ArucoDetection):
+        # Scenario 1: We are searching and find a marker for the first time.
+        if self.mission_state == MissionState.SEARCHING and len(msg.markers) > 0:
+            self.mission_state = MissionState.LOCKING_ON
+            try:
+                first_marker = msg.markers[0]
+                detected_id = first_marker.marker_id
+                self.locked_on_marker_pose = first_marker.pose  # Store the initial pose
+                self.get_logger().info(f"Marker {detected_id} detected. Attempting to lock on...")
+                self.request_marker_lock(detected_id)
+            except Exception as e:
+                self.get_logger().error(f"Error processing ArUco detection message: {e}")
+                self.mission_state = MissionState.SEARCHING # Go back to searching
+                return
+            
+        # Scenario 2: We are already locked on and need to update the pose.
+        elif self.mission_state in [MissionState.CENTERING, MissionState.APPROACHING]:
+            marker_found = False
+            for marker in msg.markers:
+                if marker.marker_id == self.locked_on_marker_id:
+                    self.locked_on_marker_pose = marker.pose # Update with the latest pose
+                    marker_found = True
+                    break # Stop searching once found
+            
+            # If the locked-on marker is no longer visible, set pose to None
+            if not marker_found:
+                self.locked_on_marker_pose = None
 
     # --- Service Call Logic ---
+    def request_marker_lock(self, marker_id):
+        self.locked_on_marker_id = marker_id
+        self.get_logger().info(f"Successfully locked on to marker {self.locked_on_marker_id}. Transitioning to CENTERING.")
+        self.mission_state = MissionState.CENTERING
+
     # def request_marker_lock(self, marker_id):
     #     req = MarkerLock.Request()
     #     req.marker_id = marker_id
@@ -236,8 +254,8 @@ class MissionControl(Node):
         
         if self.mission_state == MissionState.SEARCHING:
             self.run_searching_logic()
-        # elif self.mission_state == MissionState.CENTERING:
-        #     self.run_centering_logic()
+        elif self.mission_state == MissionState.CENTERING:
+            self.run_centering_logic()
         # elif self.mission_state == MissionState.APPROACHING:
         #     self.run_approaching_logic()
         # elif self.mission_state == MissionState.LANDING:
@@ -283,6 +301,8 @@ class MissionControl(Node):
         # elif self.latest_tof_mm <= self.HEADON_TOF_THRESHOLD:
         #     self.get_logger().info("Head-on obstacle detected. Executing 180-degree rotation.")
         #     self.execute_tello_action('cw 180', MissionState.SEARCHING)
+
+        # TO DO: add recovery behavior if stuck
         
         # 5. Path Clear
         else:
@@ -290,24 +310,24 @@ class MissionControl(Node):
             twist_msg.linear.x = self.MOVE_SPEED
             self.cmd_vel_pub.publish(twist_msg)
 
-    # def run_centering_logic(self):
-    #     if self.locked_on_marker_pose is None:
-    #         self.get_logger().warn("CENTERING: Lost marker data. Returning to SEARCHING.")
-    #         self.mission_state = MissionState.SEARCHING
-    #         return
+    def run_centering_logic(self):
+        if self.locked_on_marker_pose is None:
+            self.get_logger().warn("CENTERING: Lost marker data. Returning to SEARCHING.")
+            self.mission_state = MissionState.SEARCHING
+            return
 
-    #     twist_msg = Twist()
-    #     y_error = self.locked_on_marker_pose.position.y
+        twist_msg = Twist()
+        x_error = self.locked_on_marker_pose.position.x
         
-    #     if abs(y_error) > self.CENTERING_THRESHOLD_Y:
-    #         yaw_speed = -np.clip(y_error * self.CENTERING_YAW_KP, -self.YAW_SPEED, self.YAW_SPEED)
-    #         twist_msg.angular.z = yaw_speed
-    #         self.get_logger().info(f"CENTERING: y_error: {y_error:.2f}m, yaw_speed: {yaw_speed:.2f}", throttle_duration_sec=1.0)
-    #     else:
-    #         self.get_logger().info("CENTERING: Centered on marker. Transitioning to APPROACHING.")
-    #         self.mission_state = MissionState.APPROACHING
+        if abs(x_error) > self.CENTERING_THRESHOLD_X:
+            yaw_speed = np.clip(x_error * self.CENTERING_YAW_KP, -self.YAW_SPEED, self.YAW_SPEED)
+            twist_msg.angular.z = yaw_speed
+            self.get_logger().info(f"CENTERING: x_error: {x_error:.2f}m, yaw_speed: {yaw_speed:.2f}", throttle_duration_sec=1.0)
+        else:
+            self.get_logger().info("CENTERING: Centered on marker. Transitioning to APPROACHING.")
+            # self.mission_state = MissionState.APPROACHING
         
-    #     self.cmd_vel_pub.publish(twist_msg)
+        self.cmd_vel_pub.publish(twist_msg)
 
     # def run_approaching_logic(self):
     #     if self.locked_on_marker_pose is None:
