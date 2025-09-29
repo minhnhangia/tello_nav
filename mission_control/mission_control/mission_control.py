@@ -99,8 +99,8 @@ class MissionControl(Node):
         self.cmd_vel_pub = self.create_publisher(Twist, '/tello1/cmd_vel', 1)
         # self.tof_sub = self.create_subscription(Range, '/tello1/tof', self.tof_callback, 10)
         self.depth_sub = self.create_subscription(DepthMapAnalysis, '/tello1/depth/analysis', self.depth_analysis_callback, qos_profile)
-        self.flight_data_sub = self.create_subscription(FlightData, '/tello1/flight_data', self.flight_data_callback, 10)
-        # self.aruco_sub = self.create_subscription(ArucoDetection, '/aruco_detections', self.aruco_callback, 10)
+        self.flight_data_sub = self.create_subscription(FlightData, '/tello1/flight_data', self.flight_data_callback, qos_profile)
+        self.aruco_sub = self.create_subscription(ArucoDetection, '/aruco_detections', self.aruco_callback, qos_profile)
         # Subscribe to tello_response to know when commands actually complete
         self.tello_response_sub = self.create_subscription(TelloResponse, '/tello1/tello_response', self.tello_response_callback, 10)
 
