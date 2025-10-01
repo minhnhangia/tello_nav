@@ -44,7 +44,8 @@ class MissionControl(Node):
         # === Parameters ===
         # SEARCHING state parameters
         self.declare_parameter('yaw_speed', 50.0)
-        self.declare_parameter('move_speed', 20.0)
+        self.declare_parameter('forward_speed', 20.0)
+        self.declare_parameter('sideway_speed', 10.0)
         self.declare_parameter('corner_tof_threshold_mm', 900.0)
         self.declare_parameter('headon_tof_threshold_mm', 500.0)
         self.declare_parameter('altitude_check_interval_s', 120.0)
@@ -59,7 +60,8 @@ class MissionControl(Node):
         
         # Assign parameters to member variables
         self.YAW_SPEED = self.get_parameter('yaw_speed').value
-        self.MOVE_SPEED = self.get_parameter('move_speed').value
+        self.FORWARD_SPEED = self.get_parameter('forward_speed').value
+        self.SIDEWAY_SPEED = self.get_parameter('sideway_speed').value
         self.CORNER_TOF_THRESHOLD = self.get_parameter('corner_tof_threshold_mm').value
         self.HEADON_TOF_THRESHOLD = self.get_parameter('headon_tof_threshold_mm').value
         self.ALTITUDE_CHECK_INTERVAL = self.get_parameter('altitude_check_interval_s').value
@@ -96,7 +98,7 @@ class MissionControl(Node):
 
         # Publishers and Subscribers
         self.cmd_vel_pub = self.create_publisher(Twist, '/tello1/cmd_vel', 1)
-        # self.tof_sub = self.create_subscription(Range, '/tello1/tof', self.tof_callback, 10)
+        self.tof_sub = self.create_subscription(Range, '/tello1/ext_tof', self.tof_callback, qos_profile)
         self.depth_sub = self.create_subscription(DepthMapAnalysis, '/tello1/depth/analysis', self.depth_analysis_callback, qos_profile)
         self.flight_data_sub = self.create_subscription(FlightData, '/tello1/flight_data', self.flight_data_callback, qos_profile)
         self.aruco_sub = self.create_subscription(ArucoDetection, '/aruco_detections', self.aruco_callback, qos_profile)
@@ -275,10 +277,14 @@ class MissionControl(Node):
         depth = self.latest_depth_analysis
 
         # 1. ToF Error Check
-        # if self.latest_tof_mm > 8000.0:
-        #     self.get_logger().warning("ToF out of range or error. Hovering.")
-        #     self.cmd_vel_pub.publish(twist_msg)
-        #     return
+        if self.latest_tof_mm is None:
+            self.get_logger().info("Waiting for EXT TOF data...", throttle_duration_sec=5)
+            self.cmd_vel_pub.publish(twist_msg)
+            return
+        if self.latest_tof_mm > 8888.0:     # TO DO: confirm this is the correct out-of-range value
+            self.get_logger().info("ToF out of range or error. Hovering.")
+            self.cmd_vel_pub.publish(twist_msg)
+            return
         
         # 2. Obstacle Ahead (Depth Map)
         if depth.middle_center.red > depth.middle_center.blue:
@@ -293,21 +299,21 @@ class MissionControl(Node):
             self.cmd_vel_pub.publish(twist_msg)
         
         # # 3. Corner Avoidance (Depth Clear + ToF Close)
-        # elif depth.middle_center.blue > depth.middle_center.red and self.latest_tof_mm <= self.CORNER_TOF_THRESHOLD:
-        #     self.get_logger().info("Corner detected. Executing 150-degree clockwise rotation.")
-        #     self.execute_tello_action('cw 150', MissionState.SEARCHING)
+        elif depth.middle_center.blue > depth.middle_center.red and self.latest_tof_mm <= self.CORNER_TOF_THRESHOLD:
+            self.get_logger().warning("Corner detected. Executing 150-degree clockwise rotation.")
+            self.execute_tello_action('cw 150', MissionState.SEARCHING)
 
         # # 4. Head-on Avoidance (ToF Very Close)
-        # elif self.latest_tof_mm <= self.HEADON_TOF_THRESHOLD:
-        #     self.get_logger().info("Head-on obstacle detected. Executing 180-degree rotation.")
-        #     self.execute_tello_action('cw 180', MissionState.SEARCHING)
+        elif self.latest_tof_mm <= self.HEADON_TOF_THRESHOLD:
+            self.get_logger().warning("Head-on obstacle detected. Executing 180-degree rotation.")
+            self.execute_tello_action('cw 180', MissionState.SEARCHING)
 
         # TO DO: add recovery behavior if stuck
         
         # 5. Path Clear
         else:
             self.get_logger().info("Path clear. Moving forward.", throttle_duration_sec=2)
-            twist_msg.linear.x = self.MOVE_SPEED
+            twist_msg.linear.x = self.FORWARD_SPEED
             self.cmd_vel_pub.publish(twist_msg)
 
     def run_centering_logic(self):
