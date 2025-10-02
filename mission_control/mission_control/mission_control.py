@@ -21,9 +21,10 @@ class MissionState(Enum):
     LOCKING_ON = 1
     CENTERING = 2
     APPROACHING = 3
-    FINAL_APPROACH = 4
-    LANDING = 5
-    EXECUTING_ACTION = 6
+    CAMERA_SWITCHING = 4
+    PRECISION_LANDING = 5
+    LANDING = 6
+    EXECUTING_ACTION = 7
 
 class MissionControl(Node):
     """
@@ -49,17 +50,22 @@ class MissionControl(Node):
         self.declare_parameter('sideway_speed', 0.1)
         self.declare_parameter('corner_tof_threshold', 0.9)
         self.declare_parameter('headon_tof_threshold', 0.5)
-        self.declare_parameter('altitude_check_interval_s', 120.0)
-        self.declare_parameter('altitude_lower_step', 0.20)
-        self.declare_parameter('initial_search_height', 1.3)
-        # APPROACHING state parameters
+        # self.declare_parameter('altitude_check_interval_s', 120.0)
+        # self.declare_parameter('altitude_lower_step', 0.20)
+        # self.declare_parameter('initial_search_height', 1.3)
+        # CENTERING state parameters
         self.declare_parameter('centering_threshold_x', 0.1)
-        self.declare_parameter('centering_yaw_kp', 0.3) # Proportional gain for yaw control during centering
+        self.declare_parameter('centering_yaw_kp', 0.3) # Proportional gain for yaw control
         self.declare_parameter('marker_timeout_s', 1.5) # Timeout for marker detection
-        # FINAL_APPROACH state parameters
-        self.declare_parameter('final_approach_dist', 5.0)
+        # APPROACHING state parameters
+        self.declare_parameter('max_approach_dist', 5.0)
         self.declare_parameter('step_approach_dist', 1.0)
-        self.declare_parameter('final_approach_offset', 0.2)
+        self.declare_parameter('final_approach_offset', 0.3)
+        # PRECISION_LANDING parameters
+        self.declare_parameter('precision_landing_threshold_x', 0.1)
+        self.declare_parameter('precision_landing_threshold_y', 0.1)
+        self.declare_parameter('precision_sideway_kp', 0.3)
+        self.declare_parameter('precision_forward_kp', 0.3)
 
         # Assign parameters to member variables
         self.YAW_SPEED = self.get_parameter('yaw_speed').value
@@ -67,16 +73,20 @@ class MissionControl(Node):
         self.SIDEWAY_SPEED = self.get_parameter('sideway_speed').value
         self.CORNER_TOF_THRESHOLD = self.get_parameter('corner_tof_threshold').value
         self.HEADON_TOF_THRESHOLD = self.get_parameter('headon_tof_threshold').value
-        self.ALTITUDE_CHECK_INTERVAL = self.get_parameter('altitude_check_interval_s').value
-        self.ALTITUDE_LOWER_STEP = self.get_parameter('altitude_lower_step').value
-        self.INITIAL_SEARCH_HEIGHT = self.get_parameter('initial_search_height').value
+        # self.ALTITUDE_CHECK_INTERVAL = self.get_parameter('altitude_check_interval_s').value
+        # self.ALTITUDE_LOWER_STEP = self.get_parameter('altitude_lower_step').value
+        # self.INITIAL_SEARCH_HEIGHT = self.get_parameter('initial_search_height').value
         self.CENTERING_THRESHOLD_X = self.get_parameter('centering_threshold_x').value
         self.CENTERING_YAW_KP = self.get_parameter('centering_yaw_kp').value
         self.MARKER_TIMEOUT = self.get_parameter('marker_timeout_s').value
-        self.FINAL_APPROACH_DIST = self.get_parameter('final_approach_dist').value
+        self.MAX_APPROACH_DIST = self.get_parameter('max_approach_dist').value
         self.STEP_APPROACH_DIST = self.get_parameter('step_approach_dist').value
         self.FINAL_APPROACH_OFFSET = self.get_parameter('final_approach_offset').value
-        
+        self.PRECISION_LANDING_THRESHOLD_X = self.get_parameter('precision_landing_threshold_x').value
+        self.PRECISION_LANDING_THRESHOLD_Y = self.get_parameter('precision_landing_threshold_y').value
+        self.PRECISION_SIDEWAY_KP = self.get_parameter('precision_sideway_kp').value
+        self.PRECISION_FORWARD_KP = self.get_parameter('precision_forward_kp').value
+
         # === State & Sensor Data Variables ===
         self.mission_state = MissionState.SEARCHING
         self.latest_tof = None
@@ -268,6 +278,10 @@ class MissionControl(Node):
             self.run_centering_logic()
         elif self.mission_state == MissionState.APPROACHING:
             self.run_approaching_logic()
+        elif self.mission_state == MissionState.CAMERA_SWITCHING:
+            self.run_camera_switching_logic()
+        elif self.mission_state == MissionState.PRECISION_LANDING:
+            self.run_precision_landing_logic()
         elif self.mission_state == MissionState.LANDING:
             self.run_landing_logic()
 
@@ -386,29 +400,60 @@ class MissionControl(Node):
 
         dist_2d = math.sqrt(z**2 + x**2)
         forward_dist = z
-        self.get_logger().info(f"Final approach: moving forward {forward_dist:.2f} m, x = {x:.2f} m, y = {y:.2f} m")
-        self.execute_tello_action(f'forward {int(forward_dist * 100) - 20}', MissionState.LANDING)
 
-    #     dist_3d_cm = self.locked_on_marker_pose.position.z * 100
-    #     if dist_3d_cm < self.latest_height_cm:
-    #          self.get_logger().warning("APPROACHING: 3D distance is less than height, cannot compute 2D distance. Returning to SEARCHING")
-    #          self.mission_state = MissionState.SEARCHING
-    #          return
+        if forward_dist < self.MAX_APPROACH_DIST:
+            self.get_logger().info(f"Final approach: moving forward {forward_dist:.2f} m, x = {x:.2f} m, y = {y:.2f} m")
+            forward_dist_cmd = int(forward_dist * 100 - self.FINAL_APPROACH_OFFSET * 100)
+            self.execute_tello_action(f'forward {forward_dist_cmd}', MissionState.CAMERA_SWITCHING)
 
-    #     dist_2d_cm = math.sqrt(dist_3d_cm**2 - self.latest_height_cm**2)
-    #     self.get_logger().info(f"APPROACHING: 2D distance to marker: {dist_2d_cm:.1f} cm")
+        else:
+            self.get_logger().info(f"APPROACHING: Too far from marker ({forward_dist:.2f} m). Stepping forward {self.STEP_APPROACH_DIST} m.")
+            self.execute_tello_action(f'forward {self.STEP_APPROACH_DIST}', MissionState.CENTERING)
 
-    #     if dist_2d_cm >= self.FINAL_APPROACH_DIST:
-    #         self.get_logger().info(f"Step approach: moving forward {self.STEP_APPROACH_DIST} cm.")
-    #         self.execute_tello_action(f'forward {self.STEP_APPROACH_DIST}', MissionState.CENTERING)
-    #     else:
-    #         move_dist = int(dist_2d_cm - self.FINAL_APPROACH_OFFSET)
-    #         if move_dist > 20:
-    #             self.get_logger().info(f"Final approach: moving forward {move_dist} cm.")
-    #             self.execute_tello_action(f'forward {move_dist}', MissionState.LANDING)
-    #         else:
-    #             self.get_logger().info("Approach complete. Transitioning to LANDING.")
-    #             self.mission_state = MissionState.LANDING
+    def run_camera_switching_logic(self):
+        self.execute_tello_action(f'downvision 1', MissionState.LANDING)
+
+    def run_precision_landing_logic(self):
+        # # Check for marker timeout
+        # time_since_last_marker = (self.get_clock().now() - self.marker_last_seen_time).nanoseconds / 1e9
+        # if time_since_last_marker > self.MARKER_TIMEOUT:
+        #     self.get_logger().error(f"PRECISION_LANDING: Lost marker for >{self.MARKER_TIMEOUT}s. Moving higher.")
+        #     self.execute_tello_action(f'up 20', MissionState.PRECISION_LANDING)
+        #     return
+
+        # Check if marker is visible
+        if self.locked_on_marker_pose is None:
+            self.get_logger().warning("PRECISION_LANDING: Marker temporarily lost. Hovering and waiting...", throttle_duration_sec=1.0)
+            self.cmd_vel_pub.publish(Twist())
+            return
+
+        twist_msg = Twist()
+        
+        # Extract positional errors (in meters)
+        y_error = self.locked_on_marker_pose.position.x
+        x_error = self.locked_on_marker_pose.position.y
+
+        # Check if we are centered on both axes
+        x_centered = abs(x_error) <= self.PRECISION_LANDING_THRESHOLD_X
+        y_centered = abs(y_error) <= self.PRECISION_LANDING_THRESHOLD_Y
+
+        if x_centered and y_centered:
+            self.get_logger().info("PRECISION_LANDING: Centered over marker. Transitioning to LANDING.")
+            self.cmd_vel_pub.publish(Twist()) # Stop moving
+            self.mission_state = MissionState.LANDING
+            return
+
+        # Proportional Control for final alignment
+        if not x_centered:
+            forward_speed = np.clip(x_error * self.PRECISION_FORWARD_KP, -self.FORWARD_SPEED, self.FORWARD_SPEED)
+            twist_msg.linear.x = forward_speed
+        
+        if not y_centered:
+            sideway_speed = np.clip(y_error * self.PRECISION_SIDEWAY_KP, -self.SIDEWAY_SPEED, self.SIDEWAY_SPEED)
+            twist_msg.linear.y = -sideway_speed
+
+        self.get_logger().info(f"PRECISION_LANDING: x_err: {x_error:.2f}, y_err: {y_error:.2f}", throttle_duration_sec=0.5)
+        self.cmd_vel_pub.publish(twist_msg)
 
     def run_landing_logic(self):
         self.execute_tello_action("land", MissionState.LANDING)
