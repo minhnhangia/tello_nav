@@ -52,7 +52,7 @@ class MissionControl(Node):
         self.declare_parameter('altitude_lower_step_cm', 20)
         self.declare_parameter('initial_search_height_cm', 60.0)
         # APPROACHING state parameters
-        self.declare_parameter('centering_threshold_x', 0.15) # horizontal tolerance
+        self.declare_parameter('centering_threshold_x', 0.10) # horizontal tolerance
         self.declare_parameter('centering_yaw_kp', 30.0) # Proportional gain for yaw control during centering
         self.declare_parameter('final_approach_dist_cm', 500.0)
         self.declare_parameter('step_approach_dist_cm', 100.0)
@@ -258,10 +258,10 @@ class MissionControl(Node):
             self.run_searching_logic()
         elif self.mission_state == MissionState.CENTERING:
             self.run_centering_logic()
-        # elif self.mission_state == MissionState.APPROACHING:
-        #     self.run_approaching_logic()
-        # elif self.mission_state == MissionState.LANDING:
-            # self.execute_tello_action("land", MissionState.LANDING) # Stay in landing state
+        elif self.mission_state == MissionState.APPROACHING:
+            self.run_approaching_logic()
+        elif self.mission_state == MissionState.LANDING:
+            self.run_landing_logic()
 
     def run_searching_logic(self):
         # Wait until all necessary sensor data is available
@@ -318,32 +318,63 @@ class MissionControl(Node):
 
     def run_centering_logic(self):
         if self.locked_on_marker_pose is None:
-            self.get_logger().warn("CENTERING: Lost marker data. Returning to SEARCHING.")
+            self.get_logger().warning("CENTERING: Lost marker data. Returning to SEARCHING.")
             self.mission_state = MissionState.SEARCHING
             return
 
+        if self.latest_depth_analysis is None:
+            self.get_logger().warning("CENTERING: Waiting for depth analysis data...")
+            return
+
         twist_msg = Twist()
+        depth_analysis = self.latest_depth_analysis
+
+        # --- 1. OBSTACLE AVOIDANCE (HIGHEST PRIORITY) ---
+        # Check if an obstacle is blocking the left side of the path to the marker
+        if depth_analysis.mc_left.nonblue - 100 > depth_analysis.mc_left.blue:
+            self.get_logger().warning("CENTERING: Obstacle on the left, moving RIGHT.")
+            twist_msg.linear.y = self.SIDEWAY_SPEED
+            self.cmd_vel_pub.publish(twist_msg)
+            return
+
+        # Check if an obstacle is blocking the right side of the path
+        elif depth_analysis.mc_right.nonblue - 100 > depth_analysis.mc_right.blue:
+            self.get_logger().warning("CENTERING: Obstacle on the right, moving LEFT.")
+            twist_msg.linear.y = -self.SIDEWAY_SPEED
+            self.cmd_vel_pub.publish(twist_msg)
+            return 
+        
+        # --- 2. YAW CENTERING (RUNS IF PATH IS CLEAR) ---
         x_error = self.locked_on_marker_pose.position.x
         
         if abs(x_error) > self.CENTERING_THRESHOLD_X:
             yaw_speed = np.clip(x_error * self.CENTERING_YAW_KP, -self.YAW_SPEED, self.YAW_SPEED)
             twist_msg.angular.z = yaw_speed
             self.get_logger().info(f"CENTERING: x_error: {x_error:.2f}m, yaw_speed: {yaw_speed:.2f}", throttle_duration_sec=1.0)
+            self.cmd_vel_pub.publish(twist_msg)
         else:
             self.get_logger().info("CENTERING: Centered on marker. Transitioning to APPROACHING.")
-            # self.mission_state = MissionState.APPROACHING
+            self.cmd_vel_pub.publish(Twist()) # Stop rotation
+            self.mission_state = MissionState.APPROACHING
         
-        self.cmd_vel_pub.publish(twist_msg)
+    def run_approaching_logic(self):
+        if self.locked_on_marker_pose is None:
+            self.get_logger().warning("APPROACHING: Lost marker data. Returning to SEARCHING.")
+            self.mission_state = MissionState.SEARCHING
+            return
+        
+        x = self.locked_on_marker_pose.position.x
+        y = self.locked_on_marker_pose.position.y
+        z = self.locked_on_marker_pose.position.z
 
-    # def run_approaching_logic(self):
-    #     if self.locked_on_marker_pose is None:
-    #         self.get_logger().warn("APPROACHING: Lost marker data. Returning to SEARCHING.")
-    #         self.mission_state = MissionState.SEARCHING
-    #         return
+        dist_2d_cm = math.sqrt(z**2 + x**2) * 100
+        forward_dist_cm = z * 100
+        self.get_logger().info(f"Final approach: moving forward {forward_dist_cm} cm.")
+        self.execute_tello_action(f'forward {int(forward_dist_cm)}', MissionState.LANDING)
 
     #     dist_3d_cm = self.locked_on_marker_pose.position.z * 100
     #     if dist_3d_cm < self.latest_height_cm:
-    #          self.get_logger().warn("APPROACHING: 3D distance is less than height, cannot compute 2D distance. Returning to SEARCHING")
+    #          self.get_logger().warning("APPROACHING: 3D distance is less than height, cannot compute 2D distance. Returning to SEARCHING")
     #          self.mission_state = MissionState.SEARCHING
     #          return
 
@@ -361,6 +392,9 @@ class MissionControl(Node):
     #         else:
     #             self.get_logger().info("Approach complete. Transitioning to LANDING.")
     #             self.mission_state = MissionState.LANDING
+
+    def run_landing_logic(self):
+        self.execute_tello_action("land", MissionState.LANDING)
 
     # def check_and_lower_altitude(self):
     #     """Checks if enough time has passed to lower the drone's search altitude."""
