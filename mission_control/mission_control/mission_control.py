@@ -15,6 +15,8 @@ from tello_msgs.msg import FlightData, TelloResponse
 from aruco_opencv_msgs.msg import ArucoDetection
 from tello_msgs.srv import TelloAction
 
+from .action_manager import ActionManager
+
 class MissionState(Enum):
     """Defines the operational states of the drone."""
     SEARCHING = 0
@@ -24,7 +26,7 @@ class MissionState(Enum):
     CAMERA_SWITCHING = 4
     PRECISION_LANDING = 5
     LANDING = 6
-    EXECUTING_ACTION = 7
+    IDLE = 7
 
 class MissionControl(Node):
     """
@@ -37,6 +39,10 @@ class MissionControl(Node):
         self.set_all_params()
         self.set_pubs_subs()
         self.set_service_clients()
+
+        # Instantiate the ActionManager
+        self.action_manager = ActionManager(self, self.action_client, '/tello1/tello_response',
+                                           self.on_action_success, self.on_action_fail)
 
         # === Main Logic Timer ===
         self.timer = self.create_timer(0.25, self.main_logic_loop) # 4 Hz loop
@@ -98,11 +104,6 @@ class MissionControl(Node):
         self.locked_on_marker_pose = None
         self.marker_last_seen_time = self.get_clock().now()
 
-        # Track the state to transition to after current action completes
-        self.pending_next_state = None
-        self.action_start_time = None
-        self.ACTION_TIMEOUT_SEC = 10.0  # Maximum time to wait for action completion
-
     def set_pubs_subs(self):
         # === ROS2 Communications ===
         qos_profile = QoSProfile(
@@ -118,8 +119,6 @@ class MissionControl(Node):
         self.depth_sub = self.create_subscription(DepthMapAnalysis, '/tello1/depth/analysis', self.depth_analysis_callback, qos_profile)
         self.flight_data_sub = self.create_subscription(FlightData, '/tello1/flight_data', self.flight_data_callback, qos_profile)
         self.aruco_sub = self.create_subscription(ArucoDetection, '/aruco_detections', self.aruco_callback, qos_profile)
-        # Subscribe to tello_response to know when commands actually complete
-        self.tello_response_sub = self.create_subscription(TelloResponse, '/tello1/tello_response', self.tello_response_callback, 10)
 
     def set_service_clients(self):
         # Service Clients
@@ -141,19 +140,17 @@ class MissionControl(Node):
     def flight_data_callback(self, msg : FlightData):
         self.latest_height = float(msg.tof) / 100.0  # height measured by ToF in meters
 
-    def tello_response_callback(self, msg : TelloResponse):
-        """Called when a Tello command actually completes (not just accepted)"""
-        if self.mission_state == MissionState.EXECUTING_ACTION and self.pending_next_state is not None:
-            if msg.rc == TelloResponse.OK:
-                self.get_logger().info(f"Command completed successfully: '{msg.str}'. Transitioning to {self.pending_next_state.name}.")
-                self.mission_state = self.pending_next_state
-            else:
-                self.get_logger().error(f"Command failed: '{msg.str}'. Returning to SEARCHING.")
-                self.mission_state = MissionState.SEARCHING     # TO DO: verify recovery logic
-            
-            # Clear the pending state and timer
-            self.pending_next_state = None
-            self.action_start_time = None
+    # --- ActionManager callbacks ---
+    def on_action_success(self, next_state):
+        """Callback for when an action succeeds."""
+        if next_state is not None:
+            self.get_logger().info(f"Action succeeded! Transitioning to {next_state.name}.")
+            self.mission_state = next_state
+
+    def on_action_fail(self):
+        """Callback for when an action fails, is rejected, or times out."""
+        self.get_logger().error("Action failed! Returning to SEARCHING.")
+        self.mission_state = MissionState.SEARCHING
 
     def aruco_callback(self, msg: ArucoDetection):
         # Scenario 1: We are searching and find a marker for the first time.
@@ -211,61 +208,13 @@ class MissionControl(Node):
     #         self.get_logger().error(f'Marker lock service call failed: {e}')
     #         self.mission_state = MissionState.SEARCHING
 
-    def execute_tello_action(self, command: str, next_state_on_success: MissionState):
-        if self.mission_state == MissionState.EXECUTING_ACTION: 
-            return
-        
-        if not self.action_client.service_is_ready():
-            self.get_logger().error("Cannot execute action: Tello service not available")
-            return
-        
-        # Store the state to transition to when the action completes
-        self.pending_next_state = next_state_on_success
-        self.get_logger().info(f'Requesting action: "{command}"')
-        
-        req = TelloAction.Request()
-        req.cmd = command
-        future = self.action_client.call_async(req)
-        future.add_done_callback(self.action_acceptance_callback)
-
-    def action_acceptance_callback(self, future):
-        """Called when TelloAction service responds (command accepted/rejected, NOT completed)"""
-        try:
-            response = future.result()
-            if response.rc == TelloAction.Response.OK:
-                self.get_logger().info("Command accepted by Tello. Entering EXECUTING_ACTION state.")
-                self.mission_state = MissionState.EXECUTING_ACTION
-                self.action_start_time = self.get_clock().now()
-            else:
-                # Command was rejected - provide detailed error information
-                error_codes = {
-                    1: "OK",
-                    2: "ERROR_NOT_CONNECTED - Drone not connected or not sending telemetry/video",
-                    3: "ERROR_BUSY - Previous command still executing"
-                }
-                error_msg = error_codes.get(response.rc, f"Unknown error code: {response.rc}")
-                self.get_logger().error(f"Command rejected with code {response.rc}: {error_msg}")
-                self.mission_state = MissionState.SEARCHING
-                self.pending_next_state = None
-        except Exception as e:
-            self.get_logger().error(f'Service call failed: {e}')
-            self.mission_state = MissionState.SEARCHING
-            self.pending_next_state = None
-
     # --- Main Control Loop & State Logic ---
     def main_logic_loop(self):
         # State machine dispatcher
+        self.action_manager.check_timeout()
 
-        # If the drone is executing a discrete action, check for timeout
-        if self.mission_state == MissionState.EXECUTING_ACTION:
-            if self.action_start_time is not None:
-                elapsed = (self.get_clock().now() - self.action_start_time).nanoseconds / 1e9
-                if elapsed > self.ACTION_TIMEOUT_SEC:
-                    self.get_logger().error(f"Action timed out after {elapsed:.1f}s. Returning to SEARCHING.")
-                    self.mission_state = MissionState.SEARCHING
-                    self.pending_next_state = None
-                    self.action_start_time = None
-            return
+        if self.action_manager.is_busy():
+            return  # Wait until current action completes
 
         # If we are waiting for the marker server, HOVER.
         if self.mission_state == MissionState.LOCKING_ON:
@@ -320,12 +269,12 @@ class MissionControl(Node):
         # # 3. Corner Avoidance (Depth Clear + ToF Close)
         elif depth.middle_center.blue > depth.middle_center.red and self.latest_tof <= self.CORNER_TOF_THRESHOLD:
             self.get_logger().warning("Corner detected. Executing 150-degree clockwise rotation.")
-            self.execute_tello_action('cw 150', MissionState.SEARCHING)
+            self.action_manager.execute_action('cw 150', MissionState.SEARCHING)
 
         # # 4. Head-on Avoidance (ToF Very Close)
         elif self.latest_tof <= self.HEADON_TOF_THRESHOLD:
             self.get_logger().warning("Head-on obstacle detected. Executing 180-degree rotation.")
-            self.execute_tello_action('cw 180', MissionState.SEARCHING)
+            self.action_manager.execute_action('cw 180', MissionState.SEARCHING)
 
         # TO DO: add recovery behavior if stuck
         
@@ -385,12 +334,12 @@ class MissionControl(Node):
     def run_approaching_logic(self):
         time_since_last_marker = (self.get_clock().now() - self.marker_last_seen_time).nanoseconds / 1e9
         if time_since_last_marker > self.MARKER_TIMEOUT:
-            self.get_logger().error(f"APPROACH: Lost marker for >{self.MARKER_TIMEOUT}s. Returning to CENTERING.")
+            self.get_logger().error(f"APPROACHING: Lost marker for >{self.MARKER_TIMEOUT}s. Returning to CENTERING.")
             self.mission_state = MissionState.CENTERING
             return
 
         if self.locked_on_marker_pose is None:
-            self.get_logger().warning("APPROACH: Marker temporarily lost. Hovering and waiting...", throttle_duration_sec=1.0)
+            self.get_logger().warning("APPROACHING: Marker temporarily lost. Hovering and waiting...", throttle_duration_sec=1.0)
             self.cmd_vel_pub.publish(Twist())
             return
         
@@ -402,23 +351,24 @@ class MissionControl(Node):
         forward_dist = z
 
         if forward_dist < self.MAX_APPROACH_DIST:
-            self.get_logger().info(f"Final approach: moving forward {forward_dist:.2f} m, x = {x:.2f} m, y = {y:.2f} m")
+            self.get_logger().info(f"APPROACHING: moving forward {forward_dist:.2f} m, x = {x:.2f} m, y = {y:.2f} m")
             forward_dist_cmd = int(forward_dist * 100 - self.FINAL_APPROACH_OFFSET * 100)
-            self.execute_tello_action(f'forward {forward_dist_cmd}', MissionState.CAMERA_SWITCHING)
-
+            self.action_manager.execute_action(f'forward {forward_dist_cmd}', MissionState.CAMERA_SWITCHING)
         else:
             self.get_logger().info(f"APPROACHING: Too far from marker ({forward_dist:.2f} m). Stepping forward {self.STEP_APPROACH_DIST} m.")
-            self.execute_tello_action(f'forward {self.STEP_APPROACH_DIST}', MissionState.CENTERING)
+            forward_dist_cmd = int(self.STEP_APPROACH_DIST * 100)
+            self.action_manager.execute_action(f'forward {forward_dist_cmd}', MissionState.CENTERING)
 
     def run_camera_switching_logic(self):
-        self.execute_tello_action(f'downvision 1', MissionState.LANDING)
+        self.get_logger().info("Switching to downward-facing camera for precision landing.")
+        self.action_manager.execute_action(f'downvision 1', MissionState.LANDING)
 
     def run_precision_landing_logic(self):
         # # Check for marker timeout
         # time_since_last_marker = (self.get_clock().now() - self.marker_last_seen_time).nanoseconds / 1e9
         # if time_since_last_marker > self.MARKER_TIMEOUT:
         #     self.get_logger().error(f"PRECISION_LANDING: Lost marker for >{self.MARKER_TIMEOUT}s. Moving higher.")
-        #     self.execute_tello_action(f'up 20', MissionState.PRECISION_LANDING)
+        #     self.action_manager.execute_action(f'up 20', MissionState.PRECISION_LANDING)
         #     return
 
         # Check if marker is visible
@@ -456,7 +406,7 @@ class MissionControl(Node):
         self.cmd_vel_pub.publish(twist_msg)
 
     def run_landing_logic(self):
-        self.execute_tello_action("land", MissionState.LANDING)
+        self.action_manager.execute_action("land", MissionState.IDLE)
 
     # def check_and_lower_altitude(self):
     #     """Checks if enough time has passed to lower the drone's search altitude."""
@@ -465,7 +415,7 @@ class MissionControl(Node):
     #     if elapsed_time > self.ALTITUDE_CHECK_INTERVAL and self.latest_height_cm >= self.INITIAL_SEARCH_HEIGHT:
     #         self.get_logger().info(
     #             f"Search time exceeded {self.ALTITUDE_CHECK_INTERVAL}s. Lowering altitude by {self.ALTITUDE_LOWER_STEP}cm.")
-    #         self.execute_tello_action(f'down {self.ALTITUDE_LOWER_STEP}')
+    #         self.action_manager.execute_action(f'down {self.ALTITUDE_LOWER_STEP}')
     #         # Reset the timer for the next check
     #         self.time_search_started = self.get_clock().now()
 
