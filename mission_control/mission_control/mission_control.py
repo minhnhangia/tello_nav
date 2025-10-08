@@ -68,10 +68,11 @@ class MissionControl(Node):
         self.declare_parameter('step_approach_dist', 1.0)
         self.declare_parameter('final_approach_offset', 0.3)
         # PRECISION_LANDING parameters
-        self.declare_parameter('precision_landing_threshold_x', 0.1)
-        self.declare_parameter('precision_landing_threshold_y', 0.1)
-        self.declare_parameter('precision_sideway_kp', 0.3)
-        self.declare_parameter('precision_forward_kp', 0.3)
+        self.declare_parameter('precision_landing_threshold_x', 0.15)
+        self.declare_parameter('precision_landing_threshold_y', 0.15)
+        self.declare_parameter('precision_landing_max_speed', 0.2)
+        self.declare_parameter('precision_sideway_kp', 0.6)
+        self.declare_parameter('precision_forward_kp', 0.6)
 
         # Assign parameters to member variables
         self.YAW_SPEED = self.get_parameter('yaw_speed').value
@@ -90,6 +91,7 @@ class MissionControl(Node):
         self.FINAL_APPROACH_OFFSET = self.get_parameter('final_approach_offset').value
         self.PRECISION_LANDING_THRESHOLD_X = self.get_parameter('precision_landing_threshold_x').value
         self.PRECISION_LANDING_THRESHOLD_Y = self.get_parameter('precision_landing_threshold_y').value
+        self.PRECISION_LANDING_MAX_SPEED = self.get_parameter('precision_landing_max_speed').value
         self.PRECISION_SIDEWAY_KP = self.get_parameter('precision_sideway_kp').value
         self.PRECISION_FORWARD_KP = self.get_parameter('precision_forward_kp').value
 
@@ -141,16 +143,16 @@ class MissionControl(Node):
         self.latest_height = float(msg.tof) / 100.0  # height measured by ToF in meters
 
     # --- ActionManager callbacks ---
-    def on_action_success(self, next_state):
+    def on_action_success(self, next_state : MissionState):
         """Callback for when an action succeeds."""
         if next_state is not None:
             self.get_logger().info(f"Action succeeded! Transitioning to {next_state.name}.")
             self.mission_state = next_state
 
-    def on_action_fail(self):
+    def on_action_fail(self, fallback_state : MissionState = MissionState.SEARCHING):
         """Callback for when an action fails, is rejected, or times out."""
-        self.get_logger().error("Action failed! Returning to SEARCHING.")
-        self.mission_state = MissionState.SEARCHING
+        self.get_logger().error(f"Action failed! Fallback to {fallback_state.name}.")
+        self.mission_state = fallback_state
 
     def aruco_callback(self, msg: ArucoDetection):
         # Scenario 1: We are searching and find a marker for the first time.
@@ -169,7 +171,7 @@ class MissionControl(Node):
                 return
             
         # Scenario 2: We are already locked on and need to update the pose.
-        elif self.mission_state in [MissionState.CENTERING, MissionState.APPROACHING]:
+        elif self.mission_state in [MissionState.CENTERING, MissionState.APPROACHING, MissionState.PRECISION_LANDING]:
             marker_found = False
             for marker in msg.markers:
                 if marker.marker_id == self.locked_on_marker_id:
@@ -269,12 +271,12 @@ class MissionControl(Node):
         # # 3. Corner Avoidance (Depth Clear + ToF Close)
         elif depth.middle_center.blue > depth.middle_center.red and self.latest_tof <= self.CORNER_TOF_THRESHOLD:
             self.get_logger().warning("Corner detected. Executing 150-degree clockwise rotation.")
-            self.action_manager.execute_action('cw 150', MissionState.SEARCHING)
+            self.action_manager.execute_action('cw 150', MissionState.SEARCHING, MissionState.SEARCHING)
 
         # # 4. Head-on Avoidance (ToF Very Close)
         elif self.latest_tof <= self.HEADON_TOF_THRESHOLD:
             self.get_logger().warning("Head-on obstacle detected. Executing 180-degree rotation.")
-            self.action_manager.execute_action('cw 180', MissionState.SEARCHING)
+            self.action_manager.execute_action('cw 180', MissionState.SEARCHING, MissionState.SEARCHING)
 
         # TO DO: add recovery behavior if stuck
         
@@ -353,15 +355,15 @@ class MissionControl(Node):
         if forward_dist < self.MAX_APPROACH_DIST:
             self.get_logger().info(f"APPROACHING: moving forward {forward_dist:.2f} m, x = {x:.2f} m, y = {y:.2f} m")
             forward_dist_cmd = int(forward_dist * 100 - self.FINAL_APPROACH_OFFSET * 100)
-            self.action_manager.execute_action(f'forward {forward_dist_cmd}', MissionState.CAMERA_SWITCHING)
+            self.action_manager.execute_action(f'forward {forward_dist_cmd}', MissionState.CAMERA_SWITCHING, MissionState.CENTERING)
         else:
             self.get_logger().info(f"APPROACHING: Too far from marker ({forward_dist:.2f} m). Stepping forward {self.STEP_APPROACH_DIST} m.")
             forward_dist_cmd = int(self.STEP_APPROACH_DIST * 100)
-            self.action_manager.execute_action(f'forward {forward_dist_cmd}', MissionState.CENTERING)
+            self.action_manager.execute_action(f'forward {forward_dist_cmd}', MissionState.CENTERING, MissionState.CENTERING)
 
     def run_camera_switching_logic(self):
         self.get_logger().info("Switching to downward-facing camera for precision landing.")
-        self.action_manager.execute_action(f'downvision 1', MissionState.LANDING)
+        self.action_manager.execute_action(f'downvision 1', MissionState.PRECISION_LANDING, MissionState.CAMERA_SWITCHING)
 
     def run_precision_landing_logic(self):
         # # Check for marker timeout
@@ -380,8 +382,8 @@ class MissionControl(Node):
         twist_msg = Twist()
         
         # Extract positional errors (in meters)
-        y_error = self.locked_on_marker_pose.position.x
-        x_error = self.locked_on_marker_pose.position.y
+        y_error = self.locked_on_marker_pose.position.y
+        x_error = self.locked_on_marker_pose.position.x
 
         # Check if we are centered on both axes
         x_centered = abs(x_error) <= self.PRECISION_LANDING_THRESHOLD_X
@@ -395,18 +397,20 @@ class MissionControl(Node):
 
         # Proportional Control for final alignment
         if not x_centered:
-            forward_speed = np.clip(x_error * self.PRECISION_FORWARD_KP, -self.FORWARD_SPEED, self.FORWARD_SPEED)
-            twist_msg.linear.x = forward_speed
+            # if x_error is positive, need to move backward
+            forward_speed = np.clip(-x_error * self.PRECISION_FORWARD_KP, -self.PRECISION_LANDING_MAX_SPEED, self.PRECISION_LANDING_MAX_SPEED)
+            twist_msg.linear.x = forward_speed     
         
         if not y_centered:
-            sideway_speed = np.clip(y_error * self.PRECISION_SIDEWAY_KP, -self.SIDEWAY_SPEED, self.SIDEWAY_SPEED)
-            twist_msg.linear.y = -sideway_speed
+            # if y_error is positive, need to move left
+            sideway_speed = np.clip(-y_error * self.PRECISION_SIDEWAY_KP, -self.PRECISION_LANDING_MAX_SPEED, self.PRECISION_LANDING_MAX_SPEED)
+            twist_msg.linear.y = sideway_speed     
 
-        self.get_logger().info(f"PRECISION_LANDING: x_err: {x_error:.2f}, y_err: {y_error:.2f}", throttle_duration_sec=0.5)
+        self.get_logger().info(f"PRECISION_LANDING: x_err: {x_error:.2f}, y_err: {y_error:.2f}, speed: {twist_msg.linear}", throttle_duration_sec=0.5)
         self.cmd_vel_pub.publish(twist_msg)
 
     def run_landing_logic(self):
-        self.action_manager.execute_action("land", MissionState.IDLE)
+        self.action_manager.execute_action("land", MissionState.IDLE, MissionState.LANDING)
 
     # def check_and_lower_altitude(self):
     #     """Checks if enough time has passed to lower the drone's search altitude."""
