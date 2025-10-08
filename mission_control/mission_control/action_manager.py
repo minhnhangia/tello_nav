@@ -29,6 +29,7 @@ class ActionManager:
         self.action_client = action_client
         self.state = ActionState.IDLE
         self.pending_next_state = None
+        self.pending_fallback_state = None
         self.action_start_time = None
         self.ACTION_TIMEOUT_SEC = 10.0
         # Callbacks to notify the main MissionControl node
@@ -42,7 +43,7 @@ class ActionManager:
     def is_busy(self):
         return self.state != ActionState.IDLE
 
-    def execute_action(self, command: str, next_state_on_success: 'MissionState'):
+    def execute_action(self, command: str, next_state_on_success: 'MissionState', fallback_state_on_fail: 'MissionState'):
         if self.is_busy():
             self.logger.warning(f"ActionManager is busy, cannot execute '{command}'")
             return
@@ -52,6 +53,7 @@ class ActionManager:
             return
 
         self.pending_next_state = next_state_on_success
+        self.pending_fallback_state = fallback_state_on_fail
         self.logger.info(f'Requesting action: "{command}"')
 
         req = TelloAction.Request()
@@ -74,11 +76,11 @@ class ActionManager:
                 }
                 error_msg = error_codes.get(response.rc, f"Unknown error code: {response.rc}")
                 self.logger.error(f"Command rejected with code {response.rc}: {error_msg}")
-                self.on_fail_callback() # Notify main node of failure
+                self.on_fail_callback(self.pending_fallback_state) # Notify main node of failure
                 self.reset()
         except Exception as e:
             self.logger.error(f'Service call for action acceptance failed: {e}')
-            self.on_fail_callback()
+            self.on_fail_callback(self.pending_fallback_state)
             self.reset()
 
     def tello_response_callback(self, msg: TelloResponse):
@@ -86,12 +88,12 @@ class ActionManager:
         if self.state != ActionState.WAITING_FOR_COMPLETION:
             return # Ignore unexpected responses
 
-        if msg.rc == TelloResponse.OK:
-            self.logger.info(f"Command '{msg.str}' completed successfully.")
+        if msg.rc == TelloResponse.OK and msg.str == "ok":
+            self.logger.info(f"Command completed successfully: '{msg.str}'")
             self.on_success_callback(self.pending_next_state) # Notify main node
         else:
-            self.logger.error(f"Command '{msg.str}' failed during execution.")
-            self.on_fail_callback()
+            self.logger.error(f"Command failed during execution: '{msg.str}'")
+            self.on_fail_callback(self.pending_fallback_state)
 
         self.reset()
 
@@ -101,11 +103,12 @@ class ActionManager:
             elapsed = (self.node.get_clock().now() - self.action_start_time).nanoseconds / 1e9
             if elapsed > self.ACTION_TIMEOUT_SEC:
                 self.logger.error(f"Action timed out after {elapsed:.1f}s. Failing.")
-                self.on_fail_callback()
+                self.on_fail_callback(self.pending_fallback_state)
                 self.reset()
 
     def reset(self):
         """Resets the manager to its initial state."""
         self.state = ActionState.IDLE
         self.pending_next_state = None
+        self.pending_fallback_state = None
         self.action_start_time = None
