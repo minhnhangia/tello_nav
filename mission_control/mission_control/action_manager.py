@@ -3,7 +3,7 @@
 import rclpy
 from rclpy.node import Node
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 from tello_msgs.msg import TelloResponse
 from tello_msgs.srv import TelloAction
@@ -23,7 +23,7 @@ class ActionManager:
     This encapsulates the logic for sending a command, waiting for its
     acceptance, and waiting for its completion, including a timeout.
     """
-    def __init__(self, node: Node, action_client, tello_response_topic: str, on_success_callback, on_fail_callback):
+    def __init__(self, node: Node, action_client, tello_response_topic: str, on_success_callback : Callable, on_fail_callback : Callable, on_execute_callback : Callable):
         self.node = node
         self.logger = self.node.get_logger()
         self.action_client = action_client
@@ -35,6 +35,7 @@ class ActionManager:
         # Callbacks to notify the main MissionControl node
         self.on_success_callback = on_success_callback
         self.on_fail_callback = on_fail_callback
+        self.on_execute_callback = on_execute_callback
         
         # Subscribe to tello_response to know when commands actually complete
         self.tello_response_sub = self.node.create_subscription(
@@ -52,6 +53,7 @@ class ActionManager:
             self.logger.error("Cannot execute action: Tello service not available")
             return
 
+        self.on_execute_callback()
         self.pending_next_state = next_state_on_success
         self.pending_fallback_state = fallback_state_on_fail
         self.logger.info(f'Requesting action: "{command}"')

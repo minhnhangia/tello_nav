@@ -41,8 +41,11 @@ class MissionControl(Node):
         self.set_service_clients()
 
         # Instantiate the ActionManager
-        self.action_manager = ActionManager(self, self.action_client, '/tello1/tello_response',
-                                           self.on_action_success, self.on_action_fail)
+        self.action_manager = ActionManager(self, self.action_client, 
+                                            '/tello1/tello_response',
+                                            self.on_action_success, 
+                                            self.on_action_fail,
+                                            self.invalidate_sensor_data)
 
         # === Main Logic Timer ===
         self.timer = self.create_timer(0.25, self.main_logic_loop) # 4 Hz loop
@@ -153,6 +156,15 @@ class MissionControl(Node):
         """Callback for when an action fails, is rejected, or times out."""
         self.get_logger().error(f"Action failed! Fallback to {fallback_state.name}.")
         self.mission_state = fallback_state
+
+    def invalidate_sensor_data(self):
+        """
+        Sets critical sensor data to None. This is called just before
+        an action is executed to prevent acting on stale data post-action.
+        """
+        # self.get_logger().info("Executing action, invalidating last ToF and depth data.")
+        self.latest_tof = None
+        self.latest_depth_analysis = None
 
     def aruco_callback(self, msg: ArucoDetection):
         # Scenario 1: We are searching and find a marker for the first time.
