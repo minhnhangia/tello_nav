@@ -42,7 +42,7 @@ class MissionControl(Node):
 
         # Instantiate the ActionManager
         self.action_manager = ActionManager(self, self.action_client, 
-                                            '/tello1/tello_response',
+                                            'tello_response',
                                             self.on_action_success, 
                                             self.on_action_fail,
                                             self.invalidate_sensor_data)
@@ -119,19 +119,19 @@ class MissionControl(Node):
         )
 
         # Publishers and Subscribers
-        self.cmd_vel_pub = self.create_publisher(Twist, '/tello1/cmd_vel', 1)
-        self.tof_sub = self.create_subscription(Range, '/tello1/ext_tof', self.tof_callback, qos_profile)
-        self.depth_sub = self.create_subscription(DepthMapAnalysis, '/tello1/depth/analysis', self.depth_analysis_callback, qos_profile)
-        self.flight_data_sub = self.create_subscription(FlightData, '/tello1/flight_data', self.flight_data_callback, qos_profile)
-        self.aruco_sub = self.create_subscription(ArucoDetection, '/aruco_detections', self.aruco_callback, qos_profile)
+        self.cmd_vel_pub = self.create_publisher(Twist, 'cmd_vel', 1)
+        self.tof_sub = self.create_subscription(Range, 'ext_tof', self.tof_callback, qos_profile)
+        self.depth_sub = self.create_subscription(DepthMapAnalysis, 'depth/analysis', self.depth_analysis_callback, qos_profile)
+        self.flight_data_sub = self.create_subscription(FlightData, 'flight_data', self.flight_data_callback, qos_profile)
+        self.aruco_sub = self.create_subscription(ArucoDetection, 'aruco_detections', self.aruco_callback, qos_profile)
 
     def set_service_clients(self):
         # Service Clients
-        self.action_client = self.create_client(TelloAction, '/tello1/tello_action')
+        self.action_client = self.create_client(TelloAction, 'tello_action')
         while not self.action_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('Action service not available, waiting...')
 
-        # self.marker_lock_client = self.create_client(MarkerLock, '/tello1/request_marker_lock')
+        # self.marker_lock_client = self.create_client(MarkerLock, 'request_marker_lock')
         # while not self.marker_lock_client.wait_for_service(timeout_sec=1.0):
         #     self.get_logger().info('Marker Lock service not available, waiting...')
 
