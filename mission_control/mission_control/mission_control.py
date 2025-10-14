@@ -14,19 +14,21 @@ from midas_msgs.msg import DepthMapAnalysis
 from tello_msgs.msg import FlightData, TelloResponse
 from aruco_opencv_msgs.msg import ArucoDetection
 from tello_msgs.srv import TelloAction
+from std_srvs.srv import Trigger
 
 from .action_manager import ActionManager
 
 class MissionState(Enum):
     """Defines the operational states of the drone."""
-    SEARCHING = 0
-    LOCKING_ON = 1
-    CENTERING = 2
-    APPROACHING = 3
-    CAMERA_SWITCHING = 4
-    PRECISION_LANDING = 5
-    LANDING = 6
-    IDLE = 7
+    IDLE = 0
+    TAKING_OFF = 1
+    SEARCHING = 2
+    LOCKING_ON = 3
+    CENTERING = 4
+    APPROACHING = 5
+    CAMERA_SWITCHING = 6
+    PRECISION_LANDING = 7
+    LANDING = 8
 
 class MissionControl(Node):
     """
@@ -36,9 +38,11 @@ class MissionControl(Node):
         super().__init__('mission_control')
 
         # === Initialization ===
+        self.init_mission_state()
         self.set_all_params()
         self.set_pubs_subs()
         self.set_service_clients()
+        self.set_service_servers()
 
         # Instantiate the ActionManager
         self.action_manager = ActionManager(self, self.action_client, 
@@ -49,7 +53,19 @@ class MissionControl(Node):
 
         # === Main Logic Timer ===
         self.timer = self.create_timer(0.25, self.main_logic_loop) # 4 Hz loop
-        self.get_logger().info("Mission Control Node has started! Current state: SEARCHING")
+        self.get_logger().info(f"Mission Control Node has started! Current state: {self.mission_state.name}")
+
+    def init_mission_state(self):
+        self.mission_state = MissionState.IDLE  # Initial state
+        self.state_handlers = {
+            MissionState.TAKING_OFF: self.run_taking_off_logic,
+            MissionState.SEARCHING: self.run_searching_logic,
+            MissionState.CENTERING: self.run_centering_logic,
+            MissionState.APPROACHING: self.run_approaching_logic,
+            MissionState.CAMERA_SWITCHING: self.run_camera_switching_logic,
+            MissionState.PRECISION_LANDING: self.run_precision_landing_logic,
+            MissionState.LANDING: self.run_landing_logic,
+        }
 
     def set_all_params(self):
         # === Parameters ===
@@ -63,9 +79,9 @@ class MissionControl(Node):
         # self.declare_parameter('altitude_lower_step', 0.20)
         # self.declare_parameter('initial_search_height', 1.3)
         # CENTERING state parameters
-        self.declare_parameter('centering_threshold_x', 0.1)
+        self.declare_parameter('centering_threshold_x', 0.12)
         self.declare_parameter('centering_yaw_kp', 0.3) # Proportional gain for yaw control
-        self.declare_parameter('marker_timeout_s', 1.5) # Timeout for marker detection
+        self.declare_parameter('marker_timeout_s', 2.0) # Timeout for marker detection
         # APPROACHING state parameters
         self.declare_parameter('max_approach_dist', 5.0)
         self.declare_parameter('step_approach_dist', 1.0)
@@ -99,7 +115,6 @@ class MissionControl(Node):
         self.PRECISION_FORWARD_KP = self.get_parameter('precision_forward_kp').value
 
         # === State & Sensor Data Variables ===
-        self.mission_state = MissionState.SEARCHING
         self.latest_tof = None
         self.latest_depth_analysis = None
         self.latest_height = 0.0
@@ -134,6 +149,9 @@ class MissionControl(Node):
         # self.marker_lock_client = self.create_client(MarkerLock, 'request_marker_lock')
         # while not self.marker_lock_client.wait_for_service(timeout_sec=1.0):
         #     self.get_logger().info('Marker Lock service not available, waiting...')
+
+    def set_service_servers(self):
+        self.takeoff_srv = self.create_service(Trigger, 'takeoff', self.handle_takeoff_request)
 
     # --- Subscriber Callbacks ---
     def tof_callback(self, msg : Range):
@@ -196,6 +214,20 @@ class MissionControl(Node):
             if not marker_found:
                 self.locked_on_marker_pose = None
 
+    # --- Service Callbacks ---
+    def handle_takeoff_request(self, request, response):
+        if self.mission_state != MissionState.IDLE:
+            response.success = False
+            response.message = f"Cannot take off: Current state is {self.mission_state.name}, not IDLE."
+            self.get_logger().warning(response.message)
+            return response
+
+        self.get_logger().info("Takeoff requested. Transitioning to TAKING_OFF state.")
+        self.mission_state = MissionState.TAKING_OFF
+        response.success = True
+        response.message = "Takeoff initiated."
+        return response
+
     # --- Service Call Logic ---
     def request_marker_lock(self, marker_id):
         self.locked_on_marker_id = marker_id
@@ -225,28 +257,30 @@ class MissionControl(Node):
     # --- Main Control Loop & State Logic ---
     def main_logic_loop(self):
         # State machine dispatcher
+
         self.action_manager.check_timeout()
 
+        # Wait until current action completes
         if self.action_manager.is_busy():
-            return  # Wait until current action completes
+            return  
 
         # If we are waiting for the marker server, HOVER.
         if self.mission_state == MissionState.LOCKING_ON:
             self.cmd_vel_pub.publish(Twist())
             return
         
-        if self.mission_state == MissionState.SEARCHING:
-            self.run_searching_logic()
-        elif self.mission_state == MissionState.CENTERING:
-            self.run_centering_logic()
-        elif self.mission_state == MissionState.APPROACHING:
-            self.run_approaching_logic()
-        elif self.mission_state == MissionState.CAMERA_SWITCHING:
-            self.run_camera_switching_logic()
-        elif self.mission_state == MissionState.PRECISION_LANDING:
-            self.run_precision_landing_logic()
-        elif self.mission_state == MissionState.LANDING:
-            self.run_landing_logic()
+        # If IDLE, do nothing
+        if self.mission_state == MissionState.IDLE:
+            return
+        
+        # Dispatch to the appropriate state handler
+        handler = self.state_handlers.get(self.mission_state)
+        if handler:
+            handler()
+        
+    def run_taking_off_logic(self):
+        self.get_logger().info("TAKING_OFF: attempting takeoff.")
+        self.action_manager.execute_action(f'takeoff', MissionState.SEARCHING, MissionState.TAKING_OFF)
 
     def run_searching_logic(self):
         # Wait until all necessary sensor data is available
@@ -262,39 +296,39 @@ class MissionControl(Node):
 
         # 1. ToF Error Check
         if self.latest_tof is None:
-            self.get_logger().info("Waiting for EXT TOF data...", throttle_duration_sec=5)
+            self.get_logger().info("SEARCHING: Waiting for EXT TOF data...", throttle_duration_sec=5)
             self.cmd_vel_pub.publish(twist_msg)
             return
         if self.latest_tof > 8.888:     # TO DO: confirm this is the correct out-of-range value
-            self.get_logger().info("ToF out of range or error. Hovering.")
+            self.get_logger().info("SEARCHING: ToF out of range or error. Hovering.")
             self.cmd_vel_pub.publish(twist_msg)
             return
         
         # 2. Obstacle Ahead (Depth Map)
         if depth.middle_center.red > depth.middle_center.blue:
             if depth.middle_left.blue > depth.middle_right.blue:
-                self.get_logger().warning("Obstacle detected. Turning Left.")
+                self.get_logger().warning("SEARCHING: Obstacle detected. Turning Left.")
                 twist_msg.angular.z = -self.YAW_SPEED
             else:
-                self.get_logger().warning("Obstacle detected. Turning Right.")
+                self.get_logger().warning("SEARCHING: Obstacle detected. Turning Right.")
                 twist_msg.angular.z = self.YAW_SPEED
             self.cmd_vel_pub.publish(twist_msg)
         
         # # 3. Corner Avoidance (Depth Clear + ToF Close)
         elif depth.middle_center.blue > depth.middle_center.red and self.latest_tof <= self.CORNER_TOF_THRESHOLD:
-            self.get_logger().warning("Corner detected. Executing 150-degree clockwise rotation.")
+            self.get_logger().warning("SEARCHING: Corner detected. Executing 150-degree clockwise rotation.")
             self.action_manager.execute_action('cw 150', MissionState.SEARCHING, MissionState.SEARCHING)
 
         # # 4. Head-on Avoidance (ToF Very Close)
         elif self.latest_tof <= self.HEADON_TOF_THRESHOLD:
-            self.get_logger().warning("Head-on obstacle detected. Executing 180-degree rotation.")
+            self.get_logger().warning("SEARCHING: Head-on obstacle detected. Executing 180-degree rotation.")
             self.action_manager.execute_action('cw 180', MissionState.SEARCHING, MissionState.SEARCHING)
 
         # TO DO: add recovery behavior if stuck
         
         # 5. Path Clear
         else:
-            self.get_logger().info("Path clear. Moving forward.", throttle_duration_sec=2)
+            self.get_logger().info("SEARCHING: Path clear. Moving forward.", throttle_duration_sec=2)
             twist_msg.linear.x = self.FORWARD_SPEED
             self.cmd_vel_pub.publish(twist_msg)
 
@@ -366,7 +400,7 @@ class MissionControl(Node):
 
         if forward_dist < self.MAX_APPROACH_DIST:
             self.get_logger().info(f"APPROACHING: moving forward {forward_dist:.2f} m, x = {x:.2f} m, y = {y:.2f} m")
-            forward_dist_cmd = int(forward_dist * 100 - self.FINAL_APPROACH_OFFSET * 100)
+            forward_dist_cmd = max(0, int(forward_dist * 100 - self.FINAL_APPROACH_OFFSET * 100))
             self.action_manager.execute_action(f'forward {forward_dist_cmd}', MissionState.CAMERA_SWITCHING, MissionState.CENTERING)
         else:
             self.get_logger().info(f"APPROACHING: Too far from marker ({forward_dist:.2f} m). Stepping forward {self.STEP_APPROACH_DIST} m.")
