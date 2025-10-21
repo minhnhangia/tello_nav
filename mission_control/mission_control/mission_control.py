@@ -13,12 +13,11 @@ from sensor_msgs.msg import Range
 from midas_msgs.msg import DepthMapAnalysis
 from tello_msgs.msg import FlightData, TelloResponse
 from aruco_opencv_msgs.msg import ArucoDetection
-from std_msgs.msg import Int32MultiArray
 from tello_msgs.srv import TelloAction
 from std_srvs.srv import Trigger
-from swarm_interfaces.srv import ReserveMarker, MarkLanded
 
 from .action_manager import ActionManager
+from .aruco_marker_handler import ArucoMarkerHandler
 
 class MissionState(Enum):
     """Defines the operational states of the drone."""
@@ -53,6 +52,15 @@ class MissionControl(Node):
                                             self.on_action_success, 
                                             self.on_action_fail,
                                             self.invalidate_sensor_data)
+
+        # Instantiate the ArUco Marker Handler
+        self.marker_handler = ArucoMarkerHandler(
+            node=self,
+            drone_id=self.DRONE_ID,
+            priority_markers=self.PRIORITY_MARKERS,
+            on_marker_locked_callback=self.on_marker_locked,
+            on_marker_lost_callback=self.on_marker_lost
+        )
 
         # === Main Logic Timer ===
         self.timer = self.create_timer(0.25, self.main_logic_loop) # 4 Hz loop
@@ -133,11 +141,6 @@ class MissionControl(Node):
         self.latest_height = 0.0
         self.latest_battery = 100
         self.time_search_started = self.get_clock().now()
-        self.unavailable_markers = set()
-        # APPROACHING state variables
-        self.locked_on_marker_id = -1
-        self.locked_on_marker_pose = None
-        self.marker_last_seen_time = self.get_clock().now()
 
     def set_pubs_subs(self):
         # === ROS2 Communications ===
@@ -154,25 +157,12 @@ class MissionControl(Node):
         self.depth_sub = self.create_subscription(DepthMapAnalysis, 'depth/analysis', self.depth_analysis_callback, qos_profile)
         self.flight_data_sub = self.create_subscription(FlightData, 'flight_data', self.flight_data_callback, qos_profile)
         self.aruco_sub = self.create_subscription(ArucoDetection, 'aruco_detections', self.aruco_callback, qos_profile)
-        self.unavailable_markers_sub = self.create_subscription(Int32MultiArray, '/unavailable_markers', self.unavailable_markers_callback, 10)
 
     def set_service_clients(self):
         # Service Clients
         self.action_client = self.create_client(TelloAction, 'tello_action')
         while not self.action_client.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('Action service not available, waiting...')
-
-        self.request_marker_client = self.create_client(ReserveMarker, '/reserve_marker')
-        while not self.request_marker_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info('Reserve Marker service not available, waiting...')
-
-        self.unreserve_marker_client = self.create_client(ReserveMarker, '/unreserve_marker')
-        while not self.unreserve_marker_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info('Unreserve Marker service not available, waiting...')
-
-        self.mark_landed_client = self.create_client(MarkLanded, '/mark_landed')
-        while not self.mark_landed_client.wait_for_service(timeout_sec=1.0):
-            self.get_logger().info('Mark Landed service not available, waiting...')
 
     def set_service_servers(self):
         self.takeoff_srv = self.create_service(Trigger, 'takeoff', self.handle_takeoff_request)
@@ -191,10 +181,6 @@ class MissionControl(Node):
             self.get_logger().error(f"CRITICAL: Battery at {self.latest_battery}%", throttle_duration_sec=5.0)
         elif self.latest_battery < 50:
             self.get_logger().warning(f"Battery at {self.latest_battery}%", throttle_duration_sec=15.0)
-
-    def unavailable_markers_callback(self, msg: Int32MultiArray):
-        """Callback for receiving the list of unavailable markers from the Marker Manager."""
-        self.unavailable_markers = set(msg.data)
 
     # --- ActionManager callbacks ---
     def on_action_success(self, next_state : MissionState):
@@ -217,91 +203,28 @@ class MissionControl(Node):
         self.latest_tof = None
         self.latest_depth_analysis = None
 
-    def select_best_marker(self, markers):
-        """
-        Selects the most suitable marker from detected markers.
-        
-        Selection Strategy (in priority order):
-        1. Filter out unavailable markers (already reserved/landed by other drones)
-        2. If priority markers are detected and available, return the closest priority marker
-        3. Otherwise, return the closest available marker
-        
-        Args:
-            markers: List of detected ArUco markers from ArucoDetection message
-            
-        Returns:
-            The best marker object, or None if no suitable markers found
-        """
-        if not markers:
-            return None
-        
-        # Step 1: Filter out unavailable markers
-        available_markers = [m for m in markers if m.marker_id not in self.unavailable_markers]
-        if not available_markers:
-            self.get_logger().info(
-                f"All {len(markers)} detected marker(s) are unavailable: {[m.marker_id for m in markers]}", 
-                throttle_duration_sec=2.0
-            )
-            return None
-        
-        # If only one available marker, return it immediately
-        if len(available_markers) == 1:
-            return available_markers[0]
-        
-        # Step 2: Check for priority markers
-        priority_markers_avail = [m for m in available_markers if m.marker_id in self.PRIORITY_MARKERS]
-        if priority_markers_avail:
-            # Found priority marker(s) - select closest one
-            best_marker = min(priority_markers_avail, key=lambda m: m.pose.position.z)
-            self.get_logger().info(
-                f"Selected PRIORITY marker {best_marker.marker_id} from {len(priority_markers_avail)} priority marker(s)"
-            )
-            return best_marker
-        
-        # Step 3: No priority markers - select closest available marker
-        best_marker = min(available_markers, key=lambda m: m.pose.position.z)
-        distance = best_marker.pose.position.z
-        self.get_logger().info(
-            f"Selected closest marker {best_marker.marker_id} at {distance:.2f}m from {len(available_markers)} available marker(s)"
-        )
-        
-        return best_marker
+    # --- Marker Handler callbacks ---
+    def on_marker_locked(self, marker_id: int):
+        """Callback when marker successfully locked."""
+        self.get_logger().info(f"Marker {marker_id} locked. Transitioning to CENTERING.")
+        self.mission_state = MissionState.CENTERING
+    
+    def on_marker_lost(self):
+        """Callback when marker lock fails or is lost."""
+        self.get_logger().info("Marker lock failed. Resuming SEARCHING.")
+        self.mission_state = MissionState.SEARCHING
 
     def aruco_callback(self, msg: ArucoDetection):
+        """Process ArUco detections and delegate to marker handler."""
         # Scenario 1: We are searching and find a marker for the first time.
         if self.mission_state == MissionState.SEARCHING and len(msg.markers) > 0:
-            try:
-                best_marker = self.select_best_marker(msg.markers)
-                if best_marker is None:
-                    # All detected markers are unavailable - continue searching
-                    return
-                
-                # Found a suitable marker - attempt to lock on
-                detected_id = best_marker.marker_id
-                self.locked_on_marker_pose = best_marker.pose  # Store the initial pose
-                self.marker_last_seen_time = self.get_clock().now()
+            if self.marker_handler.process_aruco_detection_for_search(msg):
+                # Marker lock initiated, transition to LOCKING_ON
                 self.mission_state = MissionState.LOCKING_ON
-                self.get_logger().info(f"Marker {detected_id} selected. Attempting to lock on...")
-                self.request_marker_lock(detected_id, handle_response=True)
-                
-            except Exception as e:
-                self.get_logger().error(f"Error processing ArUco detection message: {e}")
-                self.mission_state = MissionState.SEARCHING # Go back to searching
-                return
             
         # Scenario 2: We are already locked on and need to update the pose.
         elif self.mission_state in [MissionState.CENTERING, MissionState.APPROACHING, MissionState.PRECISION_LANDING]:
-            marker_found = False
-            for marker in msg.markers:
-                if marker.marker_id == self.locked_on_marker_id:
-                    self.locked_on_marker_pose = marker.pose # Update with the latest pose
-                    marker_found = True
-                    self.marker_last_seen_time = self.get_clock().now()
-                    break # Stop searching once found
-            
-            # If the locked-on marker is no longer visible, set pose to None
-            if not marker_found:
-                self.locked_on_marker_pose = None
+            self.marker_handler.update_locked_marker_pose(msg)
 
     # --- Service Callbacks ---
     def handle_takeoff_request(self, request, response):
@@ -316,49 +239,14 @@ class MissionControl(Node):
         response.success = True
         response.message = "Takeoff initiated."
         return response
-
-    # --- Service Call Logic ---
-    def request_marker_lock(self, marker_id : int, handle_response : bool = True):
-        req = ReserveMarker.Request()
-        req.drone_id = self.DRONE_ID
-        req.marker_id = marker_id
-        future = self.request_marker_client.call_async(req)
-        if handle_response:
-            future.add_done_callback(lambda f, mid=marker_id: self.marker_lock_response_callback(f, mid))
-
-    def marker_lock_response_callback(self, future, marker_id):
-        try:
-            response = future.result()
-            if response.success:
-                self.locked_on_marker_id = marker_id
-                self.get_logger().info(f"Successfully locked on to marker {self.locked_on_marker_id}. Transitioning to CENTERING.")
-                self.mission_state = MissionState.CENTERING
-            else:
-                self.get_logger().info(f"Marker {marker_id} is not available. Resuming SEARCHING.")
-                self.mission_state = MissionState.SEARCHING
-        except Exception as e:
-            self.get_logger().error(f'Marker lock service call failed: {e}')
-            self.mission_state = MissionState.SEARCHING
-
-    def request_unreserve_marker(self, marker_id : int):
-        req = ReserveMarker.Request()
-        req.drone_id = self.DRONE_ID
-        req.marker_id = marker_id
-        future = self.unreserve_marker_client.call_async(req)
-
-    def request_mark_landed(self, marker_id : int):
-        req = MarkLanded.Request()
-        req.drone_id = self.DRONE_ID
-        req.marker_id = marker_id
-        future = self.mark_landed_client.call_async(req)
-
+    
     def renew_marker_reservation(self):
         """Periodically renew reservation for the currently targeted marker while approaching/landing."""
-        if self.locked_on_marker_id is None or self.locked_on_marker_id < 0:
+        if self.mission_state not in [MissionState.CENTERING, MissionState.APPROACHING, 
+                                      MissionState.CAMERA_SWITCHING, MissionState.PRECISION_LANDING, 
+                                      MissionState.LANDING]:
             return
-        if self.mission_state not in [MissionState.CENTERING, MissionState.APPROACHING, MissionState.CAMERA_SWITCHING, MissionState.PRECISION_LANDING, MissionState.LANDING]:
-            return
-        self.request_marker_lock(self.locked_on_marker_id, handle_response=False)
+        self.marker_handler.renew_marker_reservation()
 
     # --- Main Control Loop & State Logic ---
     def main_logic_loop(self):
@@ -448,14 +336,15 @@ class MissionControl(Node):
             self.get_logger().warning("CENTERING: Waiting for depth analysis data...")
             return
         
-        time_since_last_marker = (self.get_clock().now() - self.marker_last_seen_time).nanoseconds / 1e9
-        if time_since_last_marker > self.MARKER_TIMEOUT:
+        # Check for marker timeout
+        if self.marker_handler.check_marker_timeout(self.MARKER_TIMEOUT):
             self.get_logger().warning(f"CENTERING: Lost marker for >{self.MARKER_TIMEOUT}s. Returning to SEARCHING.")
-            self.request_unreserve_marker(self.locked_on_marker_id)
+            self.marker_handler.unreserve_current_marker()
             self.mission_state = MissionState.SEARCHING
             return
 
-        if self.locked_on_marker_pose is None:
+        # Check if marker is visible
+        if not self.marker_handler.is_marker_visible():
             self.get_logger().warning("CENTERING: Marker temporarily lost. Hovering and waiting...", throttle_duration_sec=1.0)
             self.cmd_vel_pub.publish(Twist())
             return
@@ -479,7 +368,8 @@ class MissionControl(Node):
             return 
         
         # --- 2. YAW CENTERING (RUNS IF PATH IS CLEAR) ---
-        x_error = self.locked_on_marker_pose.position.x
+        marker_pose = self.marker_handler.get_locked_marker_pose()
+        x_error = marker_pose.position.x
         
         if abs(x_error) > self.CENTERING_THRESHOLD_X:
             yaw_speed = np.clip(x_error * self.CENTERING_YAW_KP, -self.YAW_SPEED, self.YAW_SPEED)
@@ -492,20 +382,22 @@ class MissionControl(Node):
             self.mission_state = MissionState.APPROACHING
         
     def run_approaching_logic(self):
-        time_since_last_marker = (self.get_clock().now() - self.marker_last_seen_time).nanoseconds / 1e9
-        if time_since_last_marker > self.MARKER_TIMEOUT:
+        # Check for marker timeout
+        if self.marker_handler.check_marker_timeout(self.MARKER_TIMEOUT):
             self.get_logger().error(f"APPROACHING: Lost marker for >{self.MARKER_TIMEOUT}s. Returning to CENTERING.")
             self.mission_state = MissionState.CENTERING
             return
 
-        if self.locked_on_marker_pose is None:
+        # Check if marker is visible
+        if not self.marker_handler.is_marker_visible():
             self.get_logger().warning("APPROACHING: Marker temporarily lost. Hovering and waiting...", throttle_duration_sec=1.0)
             self.cmd_vel_pub.publish(Twist())
             return
         
-        x = self.locked_on_marker_pose.position.x
-        y = self.locked_on_marker_pose.position.y
-        z = self.locked_on_marker_pose.position.z
+        marker_pose = self.marker_handler.get_locked_marker_pose()
+        x = marker_pose.position.x
+        y = marker_pose.position.y
+        z = marker_pose.position.z
 
         dist_2d = math.sqrt(z**2 + x**2)
         forward_dist = z
@@ -525,15 +417,14 @@ class MissionControl(Node):
 
     def run_precision_landing_logic(self):
         # Check for marker timeout
-        time_since_last_marker = (self.get_clock().now() - self.marker_last_seen_time).nanoseconds / 1e9
-        if time_since_last_marker > self.PRECISION_LANDING_TIMEOUT:
+        if self.marker_handler.check_marker_timeout(self.PRECISION_LANDING_TIMEOUT):
             self.get_logger().warning(f"PRECISION_LANDING: Lost marker for >{self.PRECISION_LANDING_TIMEOUT}s. Landing blind!")
             self.cmd_vel_pub.publish(Twist()) # Stop moving
             self.mission_state = MissionState.LANDING
             return
 
         # Check if marker is visible
-        if self.locked_on_marker_pose is None:
+        if not self.marker_handler.is_marker_visible():
             self.get_logger().warning("PRECISION_LANDING: Marker temporarily lost. Hovering and waiting...", throttle_duration_sec=1.0)
             self.cmd_vel_pub.publish(Twist())
             return
@@ -541,8 +432,9 @@ class MissionControl(Node):
         twist_msg = Twist()
         
         # Extract positional errors (in meters)
-        y_error = self.locked_on_marker_pose.position.y
-        x_error = self.locked_on_marker_pose.position.x
+        marker_pose = self.marker_handler.get_locked_marker_pose()
+        y_error = marker_pose.position.y
+        x_error = marker_pose.position.x
 
         # Check if we are centered on both axes
         x_centered = abs(x_error) <= self.PRECISION_LANDING_THRESHOLD_X
@@ -565,15 +457,20 @@ class MissionControl(Node):
             sideway_speed = np.clip(-y_error * self.PRECISION_SIDEWAY_KP, -self.PRECISION_LANDING_MAX_SPEED, self.PRECISION_LANDING_MAX_SPEED)
             twist_msg.linear.y = sideway_speed     
 
-        self.get_logger().info(f"PRECISION_LANDING: x_err: {x_error:.2f}, y_err: {y_error:.2f}, speed: {twist_msg.linear}", throttle_duration_sec=0.5)
+        self.get_logger().info(f"PRECISION_LANDING: x_err: {x_error:.2f}, y_err: {y_error:.2f}, speed: {twist_msg.linear}", throttle_duration_sec=1.0)
         self.cmd_vel_pub.publish(twist_msg)
 
     def run_landing_logic(self):
+        if self.latest_height < self.MIN_TAKEOFF_HEIGHT:
+            self.get_logger().info(f"LANDING: Already landed at {self.latest_height:.2f}m. Transitioning to COMPLETING_MISSION.")
+            self.mission_state = MissionState.COMPLETING_MISSION
+            return
+        
         self.action_manager.execute_action("land", MissionState.COMPLETING_MISSION, MissionState.LANDING)
 
     def run_completing_mission_logic(self):
         self.get_logger().info("COMPLETING_MISSION: Marking marker as landed and completing mission.")
-        self.request_mark_landed(self.locked_on_marker_id)
+        self.marker_handler.mark_current_marker_landed()
         self.mission_state = MissionState.IDLE  # Reset to IDLE after mission completion
 
     # def check_and_lower_altitude(self):
