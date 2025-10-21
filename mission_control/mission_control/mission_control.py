@@ -75,6 +75,8 @@ class MissionControl(Node):
     def set_all_params(self):
         # === Parameters ===
         self.declare_parameter('drone_id', 'tello1')
+        self.declare_parameter('priority_markers', []) # high-value targets to preferentially seek
+        self.declare_parameter('min_takeoff_height', 0.3)
         # SEARCHING state parameters
         self.declare_parameter('yaw_speed', 0.5)
         self.declare_parameter('forward_speed', 0.2)
@@ -102,6 +104,8 @@ class MissionControl(Node):
 
         # Assign parameters to member variables
         self.DRONE_ID = self.get_parameter('drone_id').get_parameter_value().string_value
+        self.PRIORITY_MARKERS = set(self.get_parameter('priority_markers').value)
+        self.MIN_TAKEOFF_HEIGHT = self.get_parameter('min_takeoff_height').value
         self.YAW_SPEED = self.get_parameter('yaw_speed').value
         self.FORWARD_SPEED = self.get_parameter('forward_speed').value
         self.SIDEWAY_SPEED = self.get_parameter('sideway_speed').value
@@ -129,7 +133,7 @@ class MissionControl(Node):
         self.latest_height = 0.0
         self.latest_battery = 100
         self.time_search_started = self.get_clock().now()
-        self.unavailable_markers = []
+        self.unavailable_markers = set()
         # APPROACHING state variables
         self.locked_on_marker_id = -1
         self.locked_on_marker_pose = None
@@ -190,7 +194,7 @@ class MissionControl(Node):
 
     def unavailable_markers_callback(self, msg: Int32MultiArray):
         """Callback for receiving the list of unavailable markers from the Marker Manager."""
-        self.unavailable_markers = msg.data
+        self.unavailable_markers = set(msg.data)
 
     # --- ActionManager callbacks ---
     def on_action_success(self, next_state : MissionState):
@@ -213,17 +217,73 @@ class MissionControl(Node):
         self.latest_tof = None
         self.latest_depth_analysis = None
 
+    def select_best_marker(self, markers):
+        """
+        Selects the most suitable marker from detected markers.
+        
+        Selection Strategy (in priority order):
+        1. Filter out unavailable markers (already reserved/landed by other drones)
+        2. If priority markers are detected and available, return the closest priority marker
+        3. Otherwise, return the closest available marker
+        
+        Args:
+            markers: List of detected ArUco markers from ArucoDetection message
+            
+        Returns:
+            The best marker object, or None if no suitable markers found
+        """
+        if not markers:
+            return None
+        
+        # Step 1: Filter out unavailable markers
+        available_markers = [m for m in markers if m.marker_id not in self.unavailable_markers]
+        if not available_markers:
+            self.get_logger().info(
+                f"All {len(markers)} detected marker(s) are unavailable: {[m.marker_id for m in markers]}", 
+                throttle_duration_sec=2.0
+            )
+            return None
+        
+        # If only one available marker, return it immediately
+        if len(available_markers) == 1:
+            return available_markers[0]
+        
+        # Step 2: Check for priority markers
+        priority_markers_avail = [m for m in available_markers if m.marker_id in self.PRIORITY_MARKERS]
+        if priority_markers_avail:
+            # Found priority marker(s) - select closest one
+            best_marker = min(priority_markers_avail, key=lambda m: m.pose.position.z)
+            self.get_logger().info(
+                f"Selected PRIORITY marker {best_marker.marker_id} from {len(priority_markers_avail)} priority marker(s)"
+            )
+            return best_marker
+        
+        # Step 3: No priority markers - select closest available marker
+        best_marker = min(available_markers, key=lambda m: m.pose.position.z)
+        distance = best_marker.pose.position.z
+        self.get_logger().info(
+            f"Selected closest marker {best_marker.marker_id} at {distance:.2f}m from {len(available_markers)} available marker(s)"
+        )
+        
+        return best_marker
+
     def aruco_callback(self, msg: ArucoDetection):
         # Scenario 1: We are searching and find a marker for the first time.
         if self.mission_state == MissionState.SEARCHING and len(msg.markers) > 0:
-            self.mission_state = MissionState.LOCKING_ON
             try:
-                first_marker = msg.markers[0]
-                detected_id = first_marker.marker_id
-                self.locked_on_marker_pose = first_marker.pose  # Store the initial pose
+                best_marker = self.select_best_marker(msg.markers)
+                if best_marker is None:
+                    # All detected markers are unavailable - continue searching
+                    return
+                
+                # Found a suitable marker - attempt to lock on
+                detected_id = best_marker.marker_id
+                self.locked_on_marker_pose = best_marker.pose  # Store the initial pose
                 self.marker_last_seen_time = self.get_clock().now()
-                self.get_logger().info(f"Marker {detected_id} detected. Attempting to lock on...")
+                self.mission_state = MissionState.LOCKING_ON
+                self.get_logger().info(f"Marker {detected_id} selected. Attempting to lock on...")
                 self.request_marker_lock(detected_id, handle_response=True)
+                
             except Exception as e:
                 self.get_logger().error(f"Error processing ArUco detection message: {e}")
                 self.mission_state = MissionState.SEARCHING # Go back to searching
@@ -258,11 +318,6 @@ class MissionControl(Node):
         return response
 
     # --- Service Call Logic ---
-    # def request_marker_lock(self, marker_id):
-    #     self.locked_on_marker_id = marker_id
-    #     self.get_logger().info(f"Successfully locked on to marker {self.locked_on_marker_id}. Transitioning to CENTERING.")
-    #     self.mission_state = MissionState.CENTERING
-
     def request_marker_lock(self, marker_id : int, handle_response : bool = True):
         req = ReserveMarker.Request()
         req.drone_id = self.DRONE_ID
@@ -330,6 +385,11 @@ class MissionControl(Node):
             handler()
         
     def run_taking_off_logic(self):
+        if self.latest_height >= self.MIN_TAKEOFF_HEIGHT:
+            self.get_logger().info(f"TAKING_OFF: Already airborne at {self.latest_height:.2f}m. Transitioning to SEARCHING.")
+            self.mission_state = MissionState.SEARCHING
+            return
+        
         self.get_logger().info("TAKING_OFF: attempting takeoff.")
         self.action_manager.execute_action(f'takeoff', MissionState.SEARCHING, MissionState.TAKING_OFF)
 
