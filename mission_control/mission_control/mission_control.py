@@ -127,6 +127,7 @@ class MissionControl(Node):
         self.latest_tof = None
         self.latest_depth_analysis = None
         self.latest_height = 0.0
+        self.latest_battery = 100
         self.time_search_started = self.get_clock().now()
         self.unavailable_markers = []
         # APPROACHING state variables
@@ -181,6 +182,11 @@ class MissionControl(Node):
 
     def flight_data_callback(self, msg : FlightData):
         self.latest_height = float(msg.tof) / 100.0  # height measured by ToF in meters
+        self.latest_battery = msg.bat  # battery percentage
+        if self.latest_battery < 20:
+            self.get_logger().error(f"CRITICAL: Battery at {self.latest_battery}%", throttle_duration_sec=5.0)
+        elif self.latest_battery < 50:
+            self.get_logger().warning(f"Battery at {self.latest_battery}%", throttle_duration_sec=15.0)
 
     def unavailable_markers_callback(self, msg: Int32MultiArray):
         """Callback for receiving the list of unavailable markers from the Marker Manager."""
