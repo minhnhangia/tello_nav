@@ -426,6 +426,14 @@ class MissionControl(Node):
             self.is_blind_landing = True
             self.mission_state = MissionState.LANDING
             return
+        
+        if self.marker_handler.check_marker_timeout(self.PRECISION_LANDING_TIMEOUT / 2):
+            self.get_logger().warning(f"PRECISION_LANDING: Lost marker for >{self.PRECISION_LANDING_TIMEOUT/2}s. Moving up.")
+            if self.latest_height < 1.0:
+                twist_msg = Twist()
+                twist_msg.linear.z = self.PRECISION_LANDING_MAX_SPEED
+                self.cmd_vel_pub.publish(twist_msg)
+                return
 
         # Check if marker is visible
         if not self.marker_handler.is_marker_visible():
