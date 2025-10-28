@@ -346,8 +346,10 @@ class MissionControl(Node):
 
         # Check if marker is visible
         if not self.marker_handler.is_marker_visible():
-            self.get_logger().warning("CENTERING: Marker temporarily lost. Hovering and waiting...", throttle_duration_sec=1.0)
-            self.cmd_vel_pub.publish(Twist())
+            self.get_logger().warning("CENTERING: Marker temporarily lost. Moving forward.", throttle_duration_sec=1.0)
+            twist_msg = Twist()
+            twist_msg.linear.x = self.FORWARD_SPEED
+            self.cmd_vel_pub.publish(twist_msg)
             return
 
         twist_msg = Twist()
