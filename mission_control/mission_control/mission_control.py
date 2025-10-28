@@ -141,6 +141,7 @@ class MissionControl(Node):
         self.latest_height = 0.0
         self.latest_battery = 100
         self.time_search_started = self.get_clock().now()
+        self.is_blind_landing = False
 
     def set_pubs_subs(self):
         # === ROS2 Communications ===
@@ -420,6 +421,7 @@ class MissionControl(Node):
         if self.marker_handler.check_marker_timeout(self.PRECISION_LANDING_TIMEOUT):
             self.get_logger().warning(f"PRECISION_LANDING: Lost marker for >{self.PRECISION_LANDING_TIMEOUT}s. Landing blind!")
             self.cmd_vel_pub.publish(Twist()) # Stop moving
+            self.is_blind_landing = True
             self.mission_state = MissionState.LANDING
             return
 
@@ -443,6 +445,7 @@ class MissionControl(Node):
         if x_centered and y_centered:
             self.get_logger().info("PRECISION_LANDING: Centered over marker. Transitioning to LANDING.")
             self.cmd_vel_pub.publish(Twist()) # Stop moving
+            self.is_blind_landing = False
             self.mission_state = MissionState.LANDING
             return
 
@@ -469,8 +472,11 @@ class MissionControl(Node):
         self.action_manager.execute_action("land", MissionState.COMPLETING_MISSION, MissionState.LANDING)
 
     def run_completing_mission_logic(self):
-        self.get_logger().info("COMPLETING_MISSION: Marking marker as landed and completing mission.")
-        self.marker_handler.mark_current_marker_landed()
+        if not self.is_blind_landing:
+            self.get_logger().info("COMPLETING_MISSION: Marking marker as landed and completing mission.")
+            self.marker_handler.mark_current_marker_landed()
+        else:
+            self.get_logger().warning("COMPLETING_MISSION: Blind landing. NOT marking marker as landed.")
         self.mission_state = MissionState.IDLE  # Reset to IDLE after mission completion
 
     # def check_and_lower_altitude(self):
