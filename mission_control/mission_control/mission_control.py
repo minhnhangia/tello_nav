@@ -123,6 +123,7 @@ class MissionControl(Node):
         self.declare_parameter('precision_sideway_kp', 0.65)
         self.declare_parameter('precision_forward_kp', 0.65)
         self.declare_parameter('precision_landing_timeout_s', 14.0)
+        self.declare_parameter('recovery_height', 1.4)
 
         # Assign parameters to member variables
         self.DRONE_ID = self.get_parameter('drone_id').get_parameter_value().string_value
@@ -149,6 +150,7 @@ class MissionControl(Node):
         self.PRECISION_SIDEWAY_KP = self.get_parameter('precision_sideway_kp').get_parameter_value().double_value
         self.PRECISION_FORWARD_KP = self.get_parameter('precision_forward_kp').get_parameter_value().double_value
         self.PRECISION_LANDING_TIMEOUT = self.get_parameter('precision_landing_timeout_s').get_parameter_value().double_value
+        self.RECOVERY_HEIGHT = self.get_parameter('recovery_height').get_parameter_value().double_value
 
     def set_pubs_subs(self):
         # === ROS2 Communications ===
@@ -414,7 +416,7 @@ class MissionControl(Node):
                                         MissionState.CENTERING, MissionState.CENTERING)
             return
         
-        if abs(x_error) > self.CENTERING_THRESHOLD_X:
+        if abs(x_error) >= self.CENTERING_THRESHOLD_X:
             yaw_speed = np.clip(x_error * self.CENTERING_YAW_KP, -self.YAW_SPEED, self.YAW_SPEED)
             twist_msg.angular.z = yaw_speed
 
@@ -466,8 +468,8 @@ class MissionControl(Node):
             return
         
         if self.marker_handler.check_marker_timeout(self.PRECISION_LANDING_TIMEOUT / 2):
-            self.get_logger().warning(f"PRECISION_LANDING: Lost marker for >{self.PRECISION_LANDING_TIMEOUT/2}s. Moving up!", throttle_duration_sec=1.0)
-            if self.latest_height < 1.2:
+            if self.latest_height < self.RECOVERY_HEIGHT:
+                self.get_logger().warning(f"PRECISION_LANDING: Lost marker for >{self.PRECISION_LANDING_TIMEOUT/2}s. Moving up!", throttle_duration_sec=2.0)
                 twist_msg = Twist()
                 twist_msg.linear.z = self.ASCENDING_SPEED
                 self.cmd_vel_pub.publish(twist_msg)
