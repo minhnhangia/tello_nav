@@ -93,6 +93,25 @@ class ArucoMarkerHandler:
     def _unavailable_markers_callback(self, msg: Int32MultiArray):
         """Update the list of unavailable markers from the swarm coordinator."""
         self.unavailable_markers = set(msg.data)
+
+    def _find_priority_marker(self, avail_markers) -> Optional[object]:
+        priority_markers_avail = [
+            m for m in avail_markers
+            if m.marker_id in self.priority_markers
+        ]
+
+        if priority_markers_avail:
+            # Found priority marker(s) - select closest one
+            priority_marker = min(priority_markers_avail, key=lambda m: m.pose.position.z)
+            return priority_marker
+
+        return None
+    
+    def _filter_unavailable_markers(self, markers) -> list:
+        return [
+            m for m in markers 
+            if m.marker_id not in self.unavailable_markers
+        ]
     
     def select_best_marker(self, markers) -> Optional[object]:
         """
@@ -113,10 +132,7 @@ class ArucoMarkerHandler:
             return None
         
         # Step 1: Filter out unavailable markers
-        available_markers = [
-            m for m in markers 
-            if m.marker_id not in self.unavailable_markers
-        ]
+        available_markers = self._filter_unavailable_markers(markers)
         
         if not available_markers:
             self.logger.info(
@@ -131,19 +147,12 @@ class ArucoMarkerHandler:
             return available_markers[0]
         
         # Step 2: Check for priority markers
-        priority_markers_avail = [
-            m for m in available_markers 
-            if m.marker_id in self.priority_markers
-        ]
-        
-        if priority_markers_avail:
-            # Found priority marker(s) - select closest one
-            best_marker = min(priority_markers_avail, key=lambda m: m.pose.position.z)
-            self.logger.info(
-                f"Selected PRIORITY marker {best_marker.marker_id} from "
-                f"{len(priority_markers_avail)} priority marker(s)"
+        priority_marker = self._find_priority_marker(available_markers)
+        if priority_marker:
+            self.logger.warning(
+                f"Selected PRIORITY marker {priority_marker.marker_id}"
             )
-            return best_marker
+            return priority_marker
         
         # Step 3: No priority markers - select closest available marker
         best_marker = min(available_markers, key=lambda m: m.pose.position.z)
@@ -154,7 +163,39 @@ class ArucoMarkerHandler:
         )
         
         return best_marker
-    
+
+    def should_switch_to_priority_marker(self, msg: ArucoDetection) -> bool:
+        """
+        Decide whether to switch to a priority marker while already tracking another marker.
+
+        Args:
+            msg: ArucoDetection message containing detected markers
+
+        Returns:
+            True if a priority marker is available, False otherwise
+        """
+        if self.locked_on_marker_id in self.priority_markers:
+            # Already locked on a priority marker
+            return False
+        
+        markers = msg.markers
+        if len(markers) == 0:
+            return False
+        
+        available_markers = self._filter_unavailable_markers(markers)
+        if not available_markers:
+            return False
+
+        for marker in available_markers:
+            if marker.marker_id in self.priority_markers:
+                self.logger.warning(
+                    f"Priority marker {marker.marker_id} detected while tracking "
+                    f"marker {self.locked_on_marker_id}."
+                )
+                return True
+            
+        return False
+
     def process_aruco_detection_for_search(self, msg: ArucoDetection) -> bool:
         """
         Process ArUco detection during SEARCHING state.
@@ -247,12 +288,19 @@ class ArucoMarkerHandler:
     def _marker_lock_response_callback(self, future, marker_id: int):
         """Handle response from marker reservation request."""
         try:
+            prev_id = self.locked_on_marker_id
+
             response = future.result()
             if response.success:
                 self.locked_on_marker_id = marker_id
                 self.logger.info(
                     f"Successfully locked on to marker {self.locked_on_marker_id}."
                 )
+
+                if prev_id != -1 and prev_id != marker_id:
+                    # Unreserve previous marker if switching
+                    self._unreserve_marker_id(prev_id)
+
                 self.on_marker_locked(marker_id)
             else:
                 self.logger.info(
@@ -272,8 +320,18 @@ class ArucoMarkerHandler:
         req.drone_id = self.drone_id
         req.marker_id = self.locked_on_marker_id
         future = self.unreserve_marker_client.call_async(req)
-        
         self.logger.info(f"Unreserved marker {self.locked_on_marker_id}")
+
+    def _unreserve_marker_id(self, marker_id: int):
+        """Release the reservation on a specific marker ID."""
+        if marker_id < 0:
+            return
+        
+        req = ReserveMarker.Request()
+        req.drone_id = self.drone_id
+        req.marker_id = marker_id
+        future = self.unreserve_marker_client.call_async(req)
+        self.logger.info(f"Unreserved marker {marker_id}")
     
     def renew_marker_reservation(self):
         """Renew reservation for the currently locked marker."""
