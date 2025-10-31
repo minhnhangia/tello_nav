@@ -32,6 +32,7 @@ class MissionState(Enum):
     PRECISION_LANDING = 8
     LANDING = 9
     COMPLETING_MISSION = 10
+    RESETTING = 11
 
 class MissionControl(Node):
     """
@@ -81,6 +82,7 @@ class MissionControl(Node):
             MissionState.PRECISION_LANDING: self.run_precision_landing_logic,
             MissionState.LANDING: self.run_landing_logic,
             MissionState.COMPLETING_MISSION: self.run_completing_mission_logic,
+            MissionState.RESETTING: self.run_resetting_logic,
         }
 
     def init_runtime_vars(self):
@@ -527,7 +529,13 @@ class MissionControl(Node):
             self.marker_handler.mark_current_marker_landed()
         else:
             self.get_logger().warning("COMPLETING_MISSION: Blind landing. NOT marking marker as landed.")
-        self.mission_state = MissionState.IDLE  # Reset to IDLE after mission completion
+        self.mission_state = MissionState.RESETTING
+
+    def run_resetting_logic(self):
+        self.get_logger().info("Resetting Mission Control to initial state.")
+        self.init_runtime_vars()
+        self.marker_handler.reset_marker_state()
+        self.action_manager.execute_action(f'downvision 0', MissionState.IDLE, MissionState.IDLE)
 
     # def check_and_lower_altitude(self):
     #     """Checks if enough time has passed to lower the drone's search altitude."""

@@ -357,6 +357,7 @@ class ArucoMarkerHandler:
         """Reset all marker tracking state."""
         self.locked_on_marker_id = -1
         self.locked_on_marker_pose = None
+        self.unavailable_markers.clear()
         self.marker_last_seen_time = self.node.get_clock().now()
     
     def get_locked_marker_id(self) -> int:
