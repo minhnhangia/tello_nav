@@ -42,6 +42,7 @@ class MissionControl(Node):
 
         # === Initialization ===
         self.init_mission_state()
+        self.init_runtime_vars()
         self.set_all_params()
         self.set_pubs_subs()
         self.set_service_clients()
@@ -82,12 +83,23 @@ class MissionControl(Node):
             MissionState.COMPLETING_MISSION: self.run_completing_mission_logic,
         }
 
+    def init_runtime_vars(self):
+        # === State & Sensor Data Variables ===
+        self.latest_tof = None
+        self.latest_depth_analysis = None
+        self.latest_height = 0.0
+        self.latest_battery = 100
+        self.time_search_started = self.get_clock().now()
+        self.is_blind_landing = False
+
     def set_all_params(self):
         # === Parameters ===
         self.declare_parameter('drone_id', 'tello1')
         self.declare_parameter('priority_markers', [12, 13, 14]) # high-value targets to preferentially seek
+        # TAKING_OFF state parameters
         self.declare_parameter('min_takeoff_height', 0.3)
         self.declare_parameter('initial_search_height', 1.0)
+        self.declare_parameter('ascending_speed', 0.2)
         # SEARCHING state parameters
         self.declare_parameter('yaw_speed', 0.6)
         self.declare_parameter('forward_speed', 0.2)
@@ -117,6 +129,7 @@ class MissionControl(Node):
         self.PRIORITY_MARKERS = set(self.get_parameter('priority_markers').get_parameter_value().integer_array_value)
         self.MIN_TAKEOFF_HEIGHT = self.get_parameter('min_takeoff_height').get_parameter_value().double_value
         self.INITIAL_SEARCH_HEIGHT = self.get_parameter('initial_search_height').get_parameter_value().double_value
+        self.ASCENDING_SPEED = self.get_parameter('ascending_speed').get_parameter_value().double_value
         self.YAW_SPEED = self.get_parameter('yaw_speed').get_parameter_value().double_value
         self.FORWARD_SPEED = self.get_parameter('forward_speed').get_parameter_value().double_value
         self.SIDEWAY_SPEED = self.get_parameter('sideway_speed').get_parameter_value().double_value
@@ -136,14 +149,6 @@ class MissionControl(Node):
         self.PRECISION_SIDEWAY_KP = self.get_parameter('precision_sideway_kp').get_parameter_value().double_value
         self.PRECISION_FORWARD_KP = self.get_parameter('precision_forward_kp').get_parameter_value().double_value
         self.PRECISION_LANDING_TIMEOUT = self.get_parameter('precision_landing_timeout_s').get_parameter_value().double_value
-
-        # === State & Sensor Data Variables ===
-        self.latest_tof = None
-        self.latest_depth_analysis = None
-        self.latest_height = 0.0
-        self.latest_battery = 100
-        self.time_search_started = self.get_clock().now()
-        self.is_blind_landing = False
 
     def set_pubs_subs(self):
         # === ROS2 Communications ===
@@ -303,7 +308,7 @@ class MissionControl(Node):
         
         self.get_logger().info(f"ASCENDING: Current height {self.latest_height:.2f}m. Ascending to {self.INITIAL_SEARCH_HEIGHT:.2f}m.", throttle_duration_sec=2.0 )
         twist_msg = Twist()
-        twist_msg.linear.z = self.PRECISION_LANDING_MAX_SPEED
+        twist_msg.linear.z = self.ASCENDING_SPEED
         self.cmd_vel_pub.publish(twist_msg)
 
     def run_searching_logic(self):
@@ -407,7 +412,6 @@ class MissionControl(Node):
             self.get_logger().info(f"CENTERING: Centered but far from marker ({forward_dist:.2f}m). Moving forward!")
             self.action_manager.execute_action(f'forward {self.STEP_APPROACH_DIST * 100}', 
                                         MissionState.CENTERING, MissionState.CENTERING)
-            self.cmd_vel_pub.publish(twist_msg)
             return
         
         if abs(x_error) > self.CENTERING_THRESHOLD_X:
@@ -465,7 +469,7 @@ class MissionControl(Node):
             self.get_logger().warning(f"PRECISION_LANDING: Lost marker for >{self.PRECISION_LANDING_TIMEOUT/2}s. Moving up!", throttle_duration_sec=1.0)
             if self.latest_height < 1.2:
                 twist_msg = Twist()
-                twist_msg.linear.z = self.PRECISION_LANDING_MAX_SPEED
+                twist_msg.linear.z = self.ASCENDING_SPEED
                 self.cmd_vel_pub.publish(twist_msg)
                 return
 
