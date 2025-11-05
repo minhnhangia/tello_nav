@@ -10,7 +10,7 @@ from tello_msgs.msg import FlightData
 from tello_msgs.srv import TelloAction
 
 from ..action_manager import ActionManager
-from ..state_machine.states import MissionState
+from ..state_machine import MissionState
 
 
 class DroneInterface:
