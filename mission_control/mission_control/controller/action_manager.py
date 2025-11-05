@@ -9,7 +9,7 @@ from tello_msgs.msg import TelloResponse
 from tello_msgs.srv import TelloAction
 
 if TYPE_CHECKING:
-    from .state_machine.states import MissionState
+    from ..state_machine.states import MissionState
 
 class ActionState(Enum):
     """Defines the internal states of the ActionManager."""
