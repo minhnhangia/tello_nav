@@ -8,7 +8,7 @@ from geometry_msgs.msg import Twist, Pose
 
 from .states import MissionState
 from ..controller.drone_interface import DroneInterface
-from ..aruco_marker_handler import ArucoMarkerHandler
+from ..aruco.aruco_marker_handler import ArucoMarkerHandler
 from ..utils.parameter_loader import ParameterLoader
 
 

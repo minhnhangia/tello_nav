@@ -17,7 +17,7 @@ from tello_msgs.srv import TelloAction
 from std_srvs.srv import Trigger
 
 from .action_manager import ActionManager
-from .aruco_marker_handler import ArucoMarkerHandler
+from .aruco.aruco_marker_handler import ArucoMarkerHandler
 
 class MissionState(Enum):
     """Defines the operational states of the drone."""

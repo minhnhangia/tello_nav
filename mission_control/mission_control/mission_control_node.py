@@ -18,7 +18,7 @@ from std_srvs.srv import Trigger
 from .state_machine import MissionState, MissionManager
 from .controller import DroneInterface
 from .utils import ParameterLoader
-from .aruco_marker_handler import ArucoMarkerHandler
+from .aruco import ArucoMarkerHandler
 
 
 class MissionControl(Node):
