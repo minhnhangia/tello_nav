@@ -159,7 +159,31 @@ class DroneInterface:
         twist.linear.z = z
         twist.angular.z = yaw
         self.cmd_vel_pub.publish(twist)
-    
+
+    def move_forward(self, speed: float = 0.0):
+        self.move(x=speed)
+
+    def move_back(self, speed: float = 0.0):
+        self.move(x=-speed)
+
+    def move_up(self, speed: float = 0.0):
+        self.move(z=speed)
+
+    def move_down(self, speed: float = 0.0):
+        self.move(z=-speed)
+
+    def move_right(self, speed: float = 0.0):
+        self.move(y=speed)
+
+    def move_left(self, speed: float = 0.0):
+        self.move(y=-speed)
+
+    def yaw_right(self, speed: float = 0.0):
+        self.move(yaw=speed)
+
+    def yaw_left(self, speed: float = 0.0):
+        self.move(yaw=-speed)
+
     def execute_action(
         self,
         command: str,

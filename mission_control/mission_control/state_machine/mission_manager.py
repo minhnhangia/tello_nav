@@ -114,9 +114,7 @@ class MissionManager:
             f"Ascending to {self.params.initial_search_height:.2f}m.",
             throttle_duration_sec=2.0
         )
-        twist_msg = Twist()
-        twist_msg.linear.z = self.params.ascending_speed
-        self.drone.publish_velocity(twist_msg)
+        self.drone.move_up(self.params.ascending_speed)
         return None
     
     def run_searching_logic(self):
@@ -143,7 +141,6 @@ class MissionManager:
             )
             return None
         
-        twist_msg = Twist()
         depth = self.drone.latest_depth_analysis
         
         # 2. Obstacle Ahead (Depth Map)
@@ -152,13 +149,12 @@ class MissionManager:
                 self.node.get_logger().warning(
                     "SEARCHING: Obstacle detected. Turning Left."
                 )
-                twist_msg.angular.z = -self.params.yaw_speed
+                self.drone.yaw_left(self.params.yaw_speed)
             else:
                 self.node.get_logger().warning(
                     "SEARCHING: Obstacle detected. Turning Right."
                 )
-                twist_msg.angular.z = self.params.yaw_speed
-            self.drone.publish_velocity(twist_msg)
+                self.drone.yaw_right(self.params.yaw_speed)
         
         # 3. Corner Avoidance (Depth Clear + ToF Close)
         elif (depth.middle_center.blue > depth.middle_center.red and
@@ -185,8 +181,7 @@ class MissionManager:
         
         # 5. Path Clear - Move Forward
         else:
-            twist_msg.linear.x = self.params.forward_speed
-            self.drone.publish_velocity(twist_msg)
+            self.drone.move_forward(self.params.forward_speed)
         
         return None
     
@@ -214,7 +209,6 @@ class MissionManager:
             self.drone.hover()
             return None
         
-        twist_msg = Twist()
         depth_analysis = self.drone.latest_depth_analysis
         
         # --- 1. OBSTACLE AVOIDANCE (HIGHEST PRIORITY) ---
@@ -223,8 +217,7 @@ class MissionManager:
                 "CENTERING: Obstacle on the left, moving RIGHT.",
                 throttle_duration_sec=1.0
             )
-            twist_msg.linear.y = self.params.sideway_speed
-            self.drone.publish_velocity(twist_msg)
+            self.drone.move_right(self.params.sideway_speed)
             return None
         
         elif depth_analysis.mc_right.nonblue - 100 > depth_analysis.mc_right.blue:
@@ -232,14 +225,14 @@ class MissionManager:
                 "CENTERING: Obstacle on the right, moving LEFT.",
                 throttle_duration_sec=1.0
             )
-            twist_msg.linear.y = -self.params.sideway_speed
-            self.drone.publish_velocity(twist_msg)
+            self.drone.move_left(self.params.sideway_speed)
             return None
         
         # --- 2. YAW CENTERING (RUNS IF PATH IS CLEAR) ---
         marker_pose: Pose = self.marker_handler.get_locked_marker_pose()
         x_error = marker_pose.position.x
         forward_dist = marker_pose.position.z
+        twist_msg = Twist()
         
         # Check if centered and close enough to approach
         if (abs(x_error) < self.params.centering_threshold_x and
@@ -358,9 +351,7 @@ class MissionManager:
                     f">{self.params.precision_landing_timeout/2}s. Moving up!",
                     throttle_duration_sec=2.0
                 )
-                twist_msg = Twist()
-                twist_msg.linear.z = self.params.ascending_speed
-                self.drone.publish_velocity(twist_msg)
+                self.drone.move_up(self.params.ascending_speed)
                 return None
         
         # Check if marker is visible
@@ -371,8 +362,6 @@ class MissionManager:
             )
             self.drone.hover()
             return None
-        
-        twist_msg = Twist()
         
         # Extract positional errors
         marker_pose: Pose = self.marker_handler.get_locked_marker_pose()
@@ -390,6 +379,8 @@ class MissionManager:
             self.drone.hover()
             self.is_blind_landing = False
             return MissionState.LANDING
+        
+        twist_msg = Twist()
         
         # Proportional control for final alignment
         if not x_centered:
