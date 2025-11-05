@@ -58,16 +58,20 @@ class MissionManager:
             MissionState.RESETTING: self.run_resetting_logic,
         }
     
-    def execute_state(self, state: MissionState):
+    def execute_state(self, state: MissionState) -> Optional[MissionState]:
         """
         Execute logic for the given state.
         
         Args:
             state: Current mission state to execute
+            
+        Returns:
+            New state to transition to, or None to stay in current state
         """
         handler = self.state_handlers.get(state)
         if handler:
-            handler()
+            return handler()
+        return None
     
     def reset_runtime_state(self):
         """Reset runtime state variables."""
