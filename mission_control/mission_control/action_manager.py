@@ -9,7 +9,7 @@ from tello_msgs.msg import TelloResponse
 from tello_msgs.srv import TelloAction
 
 if TYPE_CHECKING:
-    from .mission_control import MissionState
+    from .state_machine.states import MissionState
 
 class ActionState(Enum):
     """Defines the internal states of the ActionManager."""
@@ -23,7 +23,16 @@ class ActionManager:
     This encapsulates the logic for sending a command, waiting for its
     acceptance, and waiting for its completion, including a timeout.
     """
-    def __init__(self, node: Node, action_client, tello_response_topic: str, on_success_callback : Callable, on_fail_callback : Callable, on_execute_callback : Callable):
+    def __init__(
+            self, 
+            node: Node,
+            action_client,
+            tello_response_topic: str,
+            on_success_callback: Callable,
+            on_fail_callback: Callable,
+            on_execute_callback: Callable
+        ):
+        
         self.node = node
         self.logger = self.node.get_logger()
         self.action_client = action_client
@@ -101,7 +110,7 @@ class ActionManager:
 
     def check_timeout(self):
         """Called periodically by the main node's timer."""
-        if self.state == ActionState.WAITING_FOR_COMPLETION:
+        if self.state == ActionState.WAITING_FOR_COMPLETION and self.action_start_time is not None:
             elapsed = (self.node.get_clock().now() - self.action_start_time).nanoseconds / 1e9
             if elapsed > self.ACTION_TIMEOUT_SEC:
                 self.logger.error(f"Action timed out after {elapsed:.1f}s. Failing.")

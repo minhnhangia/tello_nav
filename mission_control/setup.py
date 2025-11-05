@@ -20,7 +20,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'mission_control = mission_control.mission_control:main',
+            'mission_control = mission_control.mission_control_node:main',
         ],
     },
 )

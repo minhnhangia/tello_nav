@@ -61,6 +61,7 @@ class MissionControl(Node):
             node=self,
             drone_id=self.DRONE_ID,
             priority_markers=self.PRIORITY_MARKERS,
+            exit_markers=self.EXIT_MARKERS,
             on_marker_locked_callback=self.on_marker_locked,
             on_marker_lost_callback=self.on_marker_lost
         )
@@ -92,12 +93,14 @@ class MissionControl(Node):
         self.latest_height = 0.0
         self.latest_battery = 100
         self.time_search_started = self.get_clock().now()
+        self.is_near_exit = False
         self.is_blind_landing = False
 
     def set_all_params(self):
         # === Parameters ===
         self.declare_parameter('drone_id', 'tello1')
-        self.declare_parameter('priority_markers', [12, 13, 14]) # high-value targets to preferentially seek
+        self.declare_parameter('priority_markers', list(range(9, 15))) # high-value targets to preferentially seek
+        self.declare_parameter('exit_markers', []) # markers indicating exit points
         # TAKING_OFF state parameters
         self.declare_parameter('min_takeoff_height', 0.3)
         self.declare_parameter('initial_search_height', 1.0)
@@ -130,6 +133,7 @@ class MissionControl(Node):
         # Assign parameters to member variables
         self.DRONE_ID = self.get_parameter('drone_id').get_parameter_value().string_value
         self.PRIORITY_MARKERS = set(self.get_parameter('priority_markers').get_parameter_value().integer_array_value)
+        self.EXIT_MARKERS = set(self.get_parameter('exit_markers').get_parameter_value().integer_array_value)
         self.MIN_TAKEOFF_HEIGHT = self.get_parameter('min_takeoff_height').get_parameter_value().double_value
         self.INITIAL_SEARCH_HEIGHT = self.get_parameter('initial_search_height').get_parameter_value().double_value
         self.ASCENDING_SPEED = self.get_parameter('ascending_speed').get_parameter_value().double_value
@@ -234,6 +238,12 @@ class MissionControl(Node):
                 # Marker lock initiated, transition to LOCKING_ON
                 self.mission_state = MissionState.LOCKING_ON
                 return
+            
+            if self.marker_handler.is_near_exit_marker(msg):
+                self.is_near_exit = True
+            else:
+                self.is_near_exit = False
+            return
 
         # Scenario 1b: We are centering/approaching and may need to switch to priority marker.
         if self.mission_state in [MissionState.CENTERING, MissionState.APPROACHING]:
@@ -323,20 +333,17 @@ class MissionControl(Node):
 
         # Check for altitude adjustment
         # self.check_and_lower_altitude()
+        
+        # 1. Exit marker avoidance
+        if self.is_near_exit:
+            self.get_logger().warning("SEARCHING: Near exit. Turning 90-degree clockwise.")
+            self.is_near_exit = False
+            self.action_manager.execute_action('cw 90', MissionState.SEARCHING, MissionState.SEARCHING)
+            return
 
         twist_msg = Twist()
         depth = self.latest_depth_analysis
 
-        # 1. ToF Error Check
-        if self.latest_tof is None:
-            self.get_logger().info("SEARCHING: Waiting for EXT TOF data...", throttle_duration_sec=5)
-            self.cmd_vel_pub.publish(twist_msg)
-            return
-        if self.latest_tof > 8.888:     # TO DO: confirm this is the correct out-of-range value
-            self.get_logger().info("SEARCHING: ToF out of range or error. Hovering.")
-            self.cmd_vel_pub.publish(twist_msg)
-            return
-        
         # 2. Obstacle Ahead (Depth Map)
         if depth.middle_center.red > depth.middle_center.blue:
             if depth.middle_left.blue > depth.middle_right.blue:
@@ -349,15 +356,13 @@ class MissionControl(Node):
         
         # # 3. Corner Avoidance (Depth Clear + ToF Close)
         elif depth.middle_center.blue > depth.middle_center.red and self.latest_tof <= self.CORNER_TOF_THRESHOLD:
-            self.get_logger().warning("SEARCHING: Corner detected. Executing 150-degree clockwise rotation.")
+            self.get_logger().warning("SEARCHING: Corner detected. Turning 150-degree clockwise.")
             self.action_manager.execute_action('cw 150', MissionState.SEARCHING, MissionState.SEARCHING)
 
         # # 4. Head-on Avoidance (ToF Very Close)
         elif self.latest_tof <= self.HEADON_TOF_THRESHOLD:
-            self.get_logger().warning("SEARCHING: Head-on obstacle detected. Executing 180-degree rotation.")
+            self.get_logger().warning("SEARCHING: Head-on obstacle detected. Turning 180-degree clockwise.")
             self.action_manager.execute_action('cw 180', MissionState.SEARCHING, MissionState.SEARCHING)
-
-        # TO DO: add recovery behavior if stuck
         
         # 5. Path Clear
         else:
