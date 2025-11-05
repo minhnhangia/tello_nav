@@ -15,6 +15,7 @@ from swarm_interfaces.srv import ReserveMarker, MarkLanded
 
 from typing import Optional, Set, Callable
 import numpy as np
+from threading import Lock
 
 
 class ArucoMarkerHandler:
@@ -63,6 +64,14 @@ class ArucoMarkerHandler:
         self.locked_on_marker_id = -1
         self.locked_on_marker_pose: Optional[Pose] = None
         self.marker_last_seen_time = node.get_clock().now()
+        
+        # Pending state (pre-lock validation)
+        self._pending_marker_id = -1
+        self._pending_marker_pose: Optional[Pose] = None
+        self._pending_marker_time = node.get_clock().now()
+        
+        # Thread-safe unavailable markers tracking
+        self._unavailable_markers_lock = Lock()
         self.unavailable_markers: Set[int] = set()
         
         # Setup subscriptions and service clients
@@ -98,7 +107,8 @@ class ArucoMarkerHandler:
     
     def _unavailable_markers_callback(self, msg: Int32MultiArray):
         """Update the list of unavailable markers from the swarm coordinator."""
-        self.unavailable_markers = set(msg.data)
+        with self._unavailable_markers_lock:
+            self.unavailable_markers = set(msg.data)
 
     def _find_priority_marker(self, avail_markers) -> Optional[object]:
         priority_markers_avail = [
@@ -113,12 +123,22 @@ class ArucoMarkerHandler:
 
         return None
     
-    def _filter_unavailable_markers(self, markers) -> list:
-        """Filter out markers that are unavailable or designated as exit markers."""
+    def _filter_unavailable_markers(self, markers: list) -> list:
+        """
+        Return only markers that are:
+        - The currently locked-on marker, OR
+        - Available (not in `self.unavailable_markers`) AND below the cutoff ID.        
+        """
+        # Get thread-safe copy of unavailable markers
+        with self._unavailable_markers_lock:
+            unavailable = self.unavailable_markers.copy()
+        
         return [
             m for m in markers
-            if ((m.marker_id not in self.unavailable_markers)
-            and not m.marker_id >= self.cutoff_id)
+            if (
+                m.marker_id == self.locked_on_marker_id
+                or (m.marker_id < self.cutoff_id and m.marker_id not in unavailable)
+            )
         ]
     
     def select_best_marker(self, markers) -> Optional[object]:
@@ -225,18 +245,29 @@ class ArucoMarkerHandler:
                 # All detected markers are unavailable
                 return False
             
-            # Found a suitable marker - attempt to lock on
-            detected_id = best_marker.marker_id
-            self.locked_on_marker_pose = best_marker.pose
-            self.marker_last_seen_time = self.node.get_clock().now()
+            # Store in PENDING state
+            self._pending_marker_id = best_marker.marker_id
+            self._pending_marker_pose = best_marker.pose
+            self._pending_marker_time = self.node.get_clock().now()
             
-            self.logger.info(f"Marker {detected_id} selected. Attempting to lock on...")
-            self.request_marker_lock(detected_id, handle_response=True)
+            self.logger.info(
+                f"Marker {self._pending_marker_id} selected. Requesting reservation..."
+            )
+            
+            # Request lock - state will be committed in callback if successful
+            self.request_marker_lock(self._pending_marker_id, handle_response=True)
             return True
             
         except Exception as e:
             self.logger.error(f"Error processing ArUco detection: {e}")
+            self._clear_pending_state()
             return False
+    
+    def _clear_pending_state(self):
+        """Clear pending marker state after failed lock attempt."""
+        self._pending_marker_id = -1
+        self._pending_marker_pose = None
+        self._pending_marker_time = self.node.get_clock().now()
     
     def update_locked_marker_pose(self, msg: ArucoDetection):
         """
@@ -297,26 +328,44 @@ class ArucoMarkerHandler:
         """Handle response from marker reservation request."""
         try:
             prev_id = self.locked_on_marker_id
-
             response = future.result()
+            
             if response.success:
                 self.locked_on_marker_id = marker_id
+                self.locked_on_marker_pose = self._pending_marker_pose
+                self.marker_last_seen_time = self._pending_marker_time
+                
                 self.logger.info(
                     f"Successfully locked on to marker {self.locked_on_marker_id}."
                 )
 
+                # Cleanup: Unreserve previous marker if switching
                 if prev_id != -1 and prev_id != marker_id:
-                    # Unreserve previous marker if switching
                     self._unreserve_marker_id(prev_id)
-
+                
+                # Clear pending state after successful commit
+                self._clear_pending_state()
+                
+                # Notify mission control of successful lock
                 self.on_marker_locked(marker_id)
             else:
-                self.logger.info(
-                    f"Marker {marker_id} is not available: {response.message}"
+                # FAILURE: Lock denied - clear pending state and abort
+                self.logger.warning(
+                    f"Marker {marker_id} reservation denied: {response.message}"
                 )
+                self.locked_on_marker_id = -1
+                self.locked_on_marker_pose = None
+                self._clear_pending_state()
+                
+                # Notify mission control to resume searching
                 self.on_marker_lost()
+                
         except Exception as e:
+            # EXCEPTION: Service call failed - clear all state
             self.logger.error(f'Marker lock service call failed: {e}')
+            self.locked_on_marker_id = -1
+            self.locked_on_marker_pose = None
+            self._clear_pending_state()
             self.on_marker_lost()
     
     def unreserve_current_marker(self):
@@ -382,10 +431,12 @@ class ArucoMarkerHandler:
         return False
     
     def reset_marker_state(self):
-        """Reset all marker tracking state."""
+        """Reset all marker tracking state including pending state."""
         self.locked_on_marker_id = -1
         self.locked_on_marker_pose = None
-        self.unavailable_markers.clear()
+        self._clear_pending_state()
+        with self._unavailable_markers_lock:
+            self.unavailable_markers.clear()
         self.marker_last_seen_time = self.node.get_clock().now()
     
     def get_locked_marker_id(self) -> int:
