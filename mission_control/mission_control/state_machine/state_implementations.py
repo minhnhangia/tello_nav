@@ -132,8 +132,11 @@ class CenteringState(BaseState):
     
     def execute(self) -> Optional[MissionState]:
         """Execute CENTERING state logic with obstacle avoidance and yaw alignment."""
-        if self.drone.latest_depth_analysis is None:
-            self.node.get_logger().warning("CENTERING: Waiting for depth analysis data...")
+        if not self.drone.has_sensor_data():
+            self.node.get_logger().info(
+                'SEARCHING: Waiting for sensor data...',
+                throttle_duration_sec=5
+            )            
             return None
         
         # Check for marker timeout
@@ -147,16 +150,54 @@ class CenteringState(BaseState):
         
         # Check if marker is visible
         if not self.marker_handler.is_marker_visible():
-            self.node.get_logger().info(
-                "CENTERING: Marker temporarily lost. Hovering...",
-                throttle_duration_sec=2.0
-            )
-            self.drone.hover()
+            depth = self.drone.latest_depth_analysis 
+            is_obstacle_detected = depth.middle_center.red > depth.middle_center.blue
+            is_corner_detected = (depth.middle_center.blue > depth.middle_center.red and
+                                self.drone.latest_tof <= self.params.corner_tof_threshold)
+            is_headon_detected = self.drone.latest_tof <= self.params.headon_tof_threshold
+            is_safe_to_move_forward = not (is_obstacle_detected or is_corner_detected or is_headon_detected)
+
+            if is_safe_to_move_forward:
+                self.node.get_logger().info(
+                    "CENTERING: Marker temporarily lost. Moving forward to find...",
+                    throttle_duration_sec=2.0
+                )
+                self.drone.move_forward(self.params.forward_speed)
+            else:
+                self.node.get_logger().info(
+                    "CENTERING: Marker temporarily lost. Hovering...",
+                    throttle_duration_sec=2.0
+                )
+                self.drone.hover()
+
             return None
         
+        # --- 1. YAW CENTERING ---
+        marker_pose: Pose = self.marker_handler.get_locked_marker_pose()
+        x_error = marker_pose.position.x
+        forward_dist = marker_pose.position.z
+        twist_msg = Twist()
+        is_centered = abs(x_error) < self.params.centering_threshold_x
+        is_close_enough = forward_dist < self.params.max_approach_dist  
+
+        # Not centered - apply yaw correction
+        if not is_centered:
+            yaw_speed = np.clip(
+                x_error * self.params.centering_yaw_kp,
+                -self.params.centering_yaw_speed,
+                self.params.centering_yaw_speed
+            )
+            twist_msg.angular.z = yaw_speed
+            self.drone.publish_velocity(twist_msg)
+            self.node.get_logger().info(
+                f"CENTERING: x_error: {x_error:.2f}m, forward_dist: {forward_dist:.2f}m, "
+                f"yaw_speed: {twist_msg.angular.z:.2f} forward_speed: {twist_msg.linear.x:.2f}",
+                throttle_duration_sec=1.0
+            )
+            return None
+
+        # --- 2. OBSTACLE AVOIDANCE ---
         depth_analysis = self.drone.latest_depth_analysis
-        
-        # --- 1. OBSTACLE AVOIDANCE (HIGHEST PRIORITY) ---
         if depth_analysis.mc_left.nonblue - 100 > depth_analysis.mc_left.blue:
             self.node.get_logger().warning(
                 "CENTERING: Obstacle on the left, moving RIGHT.",
@@ -172,16 +213,10 @@ class CenteringState(BaseState):
             )
             self.drone.move_left(self.params.sideway_speed)
             return None
-        
-        # --- 2. YAW CENTERING (RUNS IF PATH IS CLEAR) ---
-        marker_pose: Pose = self.marker_handler.get_locked_marker_pose()
-        x_error = marker_pose.position.x
-        forward_dist = marker_pose.position.z
-        twist_msg = Twist()
-        
+
+        # --- 3. ADJUSTMENT ---
         # Check if centered and close enough to approach
-        if (abs(x_error) < self.params.centering_threshold_x and
-            forward_dist < self.params.max_approach_dist):
+        if (is_centered and is_close_enough):
             self.node.get_logger().info(
                 "CENTERING: Centered on marker. Transitioning to APPROACHING."
             )
@@ -189,8 +224,7 @@ class CenteringState(BaseState):
             return MissionState.APPROACHING
         
         # Centered but far - move forward
-        if (abs(x_error) < self.params.centering_threshold_x and
-            forward_dist >= self.params.max_approach_dist):
+        if (is_centered and not is_close_enough):
             self.node.get_logger().info(
                 f"CENTERING: Centered but far from marker ({forward_dist:.2f}m). "
                 "Moving forward!"
@@ -202,26 +236,9 @@ class CenteringState(BaseState):
             )
             return None
         
-        # Not centered - apply yaw correction
-        if abs(x_error) >= self.params.centering_threshold_x:
-            yaw_speed = np.clip(
-                x_error * self.params.centering_yaw_kp,
-                -self.params.yaw_speed,
-                self.params.yaw_speed
-            )
-            twist_msg.angular.z = yaw_speed
-        
-        # Also move forward if far
-        if forward_dist > self.params.max_approach_dist:
-            twist_msg.linear.x = self.params.forward_speed
-        
-        self.node.get_logger().info(
-            f"CENTERING: x_error: {x_error:.2f}m, forward_dist: {forward_dist:.2f}m, "
-            f"yaw_speed: {twist_msg.angular.z:.2f} forward_speed: {twist_msg.linear.x:.2f}",
-            throttle_duration_sec=1.0
-        )
-        self.drone.publish_velocity(twist_msg)
-        return None
+        # # Also move forward if far
+        # if forward_dist > self.params.max_approach_dist:
+        #     twist_msg.linear.x = self.params.forward_speed
 
 
 class ApproachingState(BaseState):

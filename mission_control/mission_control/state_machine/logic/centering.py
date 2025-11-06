@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+import numpy as np
+from typing import Optional
+from geometry_msgs.msg import Twist, Pose
+
+from ..states import MissionState
+from ..base_state import BaseState
+
+
+class CenteringState(BaseState):
+    """Handles yaw alignment on locked marker with obstacle avoidance."""
+    
+    def execute(self) -> Optional[MissionState]:
+        """Execute CENTERING state logic with obstacle avoidance and yaw alignment."""
+        if not self.drone.has_sensor_data():
+            self._wait_for_sensor_data()
+            return None
+        
+        # Check for marker timeout
+        if self.marker_handler.check_marker_timeout(self.params.marker_timeout):
+            self._handle_permanent_marker_lost()
+            return MissionState.SEARCHING
+        
+        # Check if marker is visible
+        if not self.marker_handler.is_marker_visible():
+            self._handle_temporary_marker_lost()
+            return None
+        
+        # --- 1. YAW CENTERING ---
+        marker_pose: Pose = self.marker_handler.get_locked_marker_pose()
+        x_error = marker_pose.position.x
+        forward_dist = marker_pose.position.z
+        is_centered = abs(x_error) < self.params.centering_threshold_x
+        is_close_enough = forward_dist < self.params.max_approach_dist  
+
+        # Not centered - apply yaw correction
+        if not is_centered:
+            self._perform_yaw_centering(x_error)
+            return None
+
+        # --- 2. OBSTACLE AVOIDANCE ---
+        if self._avoid_obstacle_if_needed():
+            return None
+
+        # --- 3. DECIDE TO APPROACH ---
+        # Check if centered and close enough to approach
+        if (is_centered and is_close_enough):
+            self._handle_successful_centering()
+            return MissionState.APPROACHING
+        
+        # Centered but far - move closer
+        if (is_centered and not is_close_enough):
+            self._move_closer_to_marker(forward_dist)
+            return None
+        
+    def _wait_for_sensor_data(self):
+        self.node.get_logger().info(
+            'CENTERING: Waiting for sensor data...',
+            throttle_duration_sec=5
+        )
+        self.drone.hover()
+
+    def _handle_permanent_marker_lost(self):
+        self.node.get_logger().warning(
+            f"CENTERING: Lost marker for >{self.params.marker_timeout}s. "
+            "Returning to SEARCHING."
+        )
+        self.marker_handler.unreserve_current_marker()
+
+    def _handle_temporary_marker_lost(self):
+        if not self.drone.has_sensor_data():
+            return
+        
+        depth = self.drone.latest_depth_analysis
+        tof = self.drone.latest_tof
+        is_obstacle_detected = depth.middle_center.red > depth.middle_center.blue
+        is_corner_detected = (depth.middle_center.blue > depth.middle_center.red and 
+                              tof <= self.params.corner_tof_threshold)
+        is_headon_detected = tof <= self.params.headon_tof_threshold
+        is_safe_to_move_forward = not (is_obstacle_detected or 
+                                       is_corner_detected or 
+                                       is_headon_detected)
+
+        if is_safe_to_move_forward:
+            self.node.get_logger().info(
+                "CENTERING: Marker temporarily lost. Moving forward to find...",
+                throttle_duration_sec=2.0
+            )
+            self.drone.move_forward(self.params.forward_speed)
+        else:
+            self._hover_on_temporary_marker_lost()
+
+    def _hover_on_temporary_marker_lost(self):
+        self.node.get_logger().info(
+            "CENTERING: Marker temporarily lost. Hovering...",
+            throttle_duration_sec=2.0
+        )
+        self.drone.hover()
+
+    def _perform_yaw_centering(self, x_error: float):
+        twist_msg = Twist()
+        twist_msg.angular.z = self._compute_speed(
+            error=x_error,
+            kp=self.params.centering_yaw_kp,
+            max_speed=self.params.centering_yaw_speed
+        )
+        self.node.get_logger().info(
+            f"CENTERING: x_error: {x_error:.2f}m, "
+            f"yaw_speed: {twist_msg.angular.z:.2f}",
+            throttle_duration_sec=1.0
+        )
+        self.drone.publish_velocity(twist_msg)
+
+    def _avoid_obstacle_if_needed(self) -> bool:
+        depth = self.drone.latest_depth_analysis
+        if depth.mc_left.nonblue - 100 > depth.mc_left.blue:
+            self.node.get_logger().warning(
+                "CENTERING: Obstacle on the left, moving RIGHT.",
+                throttle_duration_sec=1.0
+            )
+            self.drone.move_right(self.params.sideway_speed)
+            return True
+        
+        elif depth.mc_right.nonblue - 100 > depth.mc_right.blue:
+            self.node.get_logger().warning(
+                "CENTERING: Obstacle on the right, moving LEFT.",
+                throttle_duration_sec=1.0
+            )
+            self.drone.move_left(self.params.sideway_speed)
+            return True
+        
+        return False
+
+    def _handle_successful_centering(self):
+        self.node.get_logger().info(
+            "CENTERING: Centered on marker. Transitioning to APPROACHING."
+        )
+        self.drone.hover()
+
+    def _move_closer_to_marker(self, forward_dist: float):
+        """Move closer to the marker by a fixed step distance."""
+        # step_distance = min(self.params.step_approach_dist, 
+        #                     forward_dist - self.params.max_approach_dist + 10)
+        step_distance = int(self.params.step_approach_dist)
+        self.node.get_logger().info(
+            f"CENTERING: Centered but far from marker ({forward_dist:.2f}m). "
+            f"Moving closer by {step_distance:.2f}m."
+        )
+        self.drone.execute_action(
+            f'forward {step_distance * 100}',
+            MissionState.CENTERING,
+            MissionState.CENTERING
+        )
+
+    def _compute_speed(self, error: float, kp: float, max_speed: float) -> float:
+        """Compute velocity command using proportional control."""
+        return np.clip(
+            error * kp,
+            -max_speed,
+            max_speed
+        )
