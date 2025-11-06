@@ -79,10 +79,15 @@ class SearchingState(BaseState):
             return None
         
         depth = self.drone.latest_depth_analysis
-        
+        is_obstacle_detected = depth.middle_center.red > depth.middle_center.blue
+        is_left_clearer = depth.middle_left.blue > depth.middle_right.blue
+        is_corner_detected = (depth.middle_center.blue > depth.middle_center.red and
+                              self.drone.latest_tof <= self.params.corner_tof_threshold)
+        is_headon_detected = self.drone.latest_tof <= self.params.headon_tof_threshold
+
         # 2. Obstacle Ahead (Depth Map)
-        if depth.middle_center.red > depth.middle_center.blue:
-            if depth.middle_left.blue > depth.middle_right.blue:
+        if is_obstacle_detected:
+            if is_left_clearer:
                 self.node.get_logger().warning(
                     "SEARCHING: Obstacle detected. Turning Left."
                 )
@@ -94,8 +99,7 @@ class SearchingState(BaseState):
                 self.drone.yaw_right(self.params.yaw_speed)
         
         # 3. Corner Avoidance (Depth Clear + ToF Close)
-        elif (depth.middle_center.blue > depth.middle_center.red and
-              self.drone.latest_tof <= self.params.corner_tof_threshold):
+        elif is_corner_detected:
             self.node.get_logger().warning(
                 "SEARCHING: Corner detected. Turning 150-degree clockwise."
             )
@@ -106,7 +110,7 @@ class SearchingState(BaseState):
             )
         
         # 4. Head-on Avoidance (ToF Very Close)
-        elif self.drone.latest_tof <= self.params.headon_tof_threshold:
+        elif is_headon_detected:
             self.node.get_logger().warning(
                 "SEARCHING: Head-on obstacle detected. Turning 180-degree clockwise."
             )
