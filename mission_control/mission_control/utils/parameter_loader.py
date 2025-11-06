@@ -25,7 +25,7 @@ class ParameterLoader:
         self.node.declare_parameter('ascending_speed', 0.2)
         
         # SEARCHING state parameters
-        self.node.declare_parameter('yaw_speed', 0.6)
+        self.node.declare_parameter('yaw_speed', 0.5)
         self.node.declare_parameter('forward_speed', 0.2)
         self.node.declare_parameter('sideway_speed', 0.1)
         self.node.declare_parameter('corner_tof_threshold', 0.9)
@@ -34,6 +34,7 @@ class ParameterLoader:
         # CENTERING state parameters
         self.node.declare_parameter('centering_threshold_x', 0.12)
         self.node.declare_parameter('centering_yaw_kp', 0.4)
+        self.node.declare_parameter('centering_yaw_speed', 0.6)
         self.node.declare_parameter('marker_timeout_s', 2.5)
         self.node.declare_parameter('max_approach_dist', 2.5)
         self.node.declare_parameter('step_approach_dist', 0.6)
@@ -72,6 +73,7 @@ class ParameterLoader:
         # Centering
         self.centering_threshold_x = self.node.get_parameter('centering_threshold_x').get_parameter_value().double_value
         self.centering_yaw_kp = self.node.get_parameter('centering_yaw_kp').get_parameter_value().double_value
+        self.centering_yaw_speed = self.node.get_parameter('centering_yaw_speed').get_parameter_value().double_value
         self.marker_timeout = self.node.get_parameter('marker_timeout_s').get_parameter_value().double_value
         self.max_approach_dist = self.node.get_parameter('max_approach_dist').get_parameter_value().double_value
         self.step_approach_dist = self.node.get_parameter('step_approach_dist').get_parameter_value().double_value
