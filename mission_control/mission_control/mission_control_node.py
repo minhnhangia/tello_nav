@@ -213,7 +213,7 @@ class MissionControl(Node):
         
         # Special case: LOCKING_ON - hover while waiting for marker server
         if self.mission_state == MissionState.LOCKING_ON:
-            self.drone.hover()
+            # self.drone.hover()
             return
         
         # Special case: IDLE - do nothing
