@@ -16,9 +16,9 @@ class TakingOffState(BaseState):
         if self.drone.latest_height >= self.params.min_takeoff_height:
             self.node.get_logger().info(
                 f"TAKING_OFF: Already airborne at {self.drone.latest_height:.2f}m. "
-                "Transitioning to SEARCHING."
+                "Transitioning to ASCENDING."
             )
-            return MissionState.SEARCHING
+            return MissionState.ASCENDING
         
         self.node.get_logger().info("TAKING_OFF: attempting takeoff.")
         self.drone.execute_action(
