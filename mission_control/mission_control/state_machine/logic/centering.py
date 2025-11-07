@@ -141,7 +141,7 @@ class CenteringState(BaseState):
         """Move closer to the marker by a fixed step distance."""
         # step_distance = min(self.params.step_approach_dist, 
         #                     forward_dist - self.params.max_approach_dist + 10)
-        step_distance = int(self.params.step_approach_dist)
+        step_distance = self.params.step_approach_dist
         self.node.get_logger().info(
             f"CENTERING: Centered but far from marker ({forward_dist:.2f}m). "
             f"Moving closer by {step_distance:.2f}m."
