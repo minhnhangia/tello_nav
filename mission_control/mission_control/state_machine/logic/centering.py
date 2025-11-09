@@ -2,6 +2,7 @@
 import numpy as np
 from typing import Optional
 from geometry_msgs.msg import Twist, Pose
+from midas_msgs.msg import DepthMapAnalysis
 
 from ..states import MissionState
 from ..base_state import BaseState
@@ -12,34 +13,35 @@ class CenteringState(BaseState):
     
     def execute(self) -> Optional[MissionState]:
         """Execute CENTERING state logic with obstacle avoidance and yaw alignment."""
-        if not self.drone.has_sensor_data():
-            self._wait_for_sensor_data()
-            return None
-        
         # Check for marker timeout
         if self.marker_handler.check_marker_timeout(self.params.marker_timeout):
             self._handle_permanent_marker_lost()
             return MissionState.SEARCHING
         
+        if not self.drone.has_sensor_data():
+            self._wait_for_sensor_data()
+            return None
+        # Get sensor data
+        depth: DepthMapAnalysis = self.drone.latest_depth_analysis # type: ignore
+        tof: float = self.drone.latest_tof # type: ignore
+        
         # Check if marker is visible
         if not self.marker_handler.is_marker_visible():
-            self._handle_temporary_marker_lost()
+            self._handle_temporary_marker_lost(depth, tof)
             return None
-        
-        # --- 1. YAW CENTERING ---
-        marker_pose: Pose = self.marker_handler.get_locked_marker_pose()
+        marker_pose: Pose = self.marker_handler.get_locked_marker_pose() # type: ignore
         x_error = marker_pose.position.x
         forward_dist = marker_pose.position.z
         is_centered = abs(x_error) < self.params.centering_threshold_x
-        is_close_enough = forward_dist < self.params.max_approach_dist  
-
-        # Not centered - apply yaw correction
+        is_close_enough = forward_dist < self.params.max_approach_dist 
+        
+        # --- 1. OBSTACLE AVOIDANCE ---
+        if self._avoid_obstacle_if_needed(depth, x_error):
+            return None
+        
+        # --- 2. YAW CENTERING ---
         if not is_centered:
             self._perform_yaw_centering(x_error)
-            return None
-
-        # --- 2. OBSTACLE AVOIDANCE ---
-        if self._avoid_obstacle_if_needed():
             return None
 
         # --- 3. DECIDE TO APPROACH ---
@@ -67,16 +69,17 @@ class CenteringState(BaseState):
         )
         self.marker_handler.unreserve_current_marker()
 
-    def _handle_temporary_marker_lost(self):
+    def _handle_temporary_marker_lost(self, depth: DepthMapAnalysis, tof: float):
         if not self.drone.has_sensor_data():
             return
         
-        depth = self.drone.latest_depth_analysis
-        tof = self.drone.latest_tof
         is_obstacle_detected = depth.middle_center.red > depth.middle_center.blue
+
         is_corner_detected = (depth.middle_center.blue > depth.middle_center.red and 
                               tof <= self.params.corner_tof_threshold)
+        
         is_headon_detected = tof <= self.params.headon_tof_threshold
+
         is_safe_to_move_forward = not (is_obstacle_detected or 
                                        is_corner_detected or 
                                        is_headon_detected)
@@ -111,19 +114,29 @@ class CenteringState(BaseState):
         )
         self.drone.publish_velocity(twist_msg)
 
-    def _avoid_obstacle_if_needed(self) -> bool:
-        depth = self.drone.latest_depth_analysis
-        if depth.mc_left.nonblue - 100 > depth.mc_left.blue:
+    def _avoid_obstacle_if_needed(self, depth: DepthMapAnalysis, 
+                                  x_error: float) -> bool:
+        is_obstacle_left = depth.mc_left.nonblue - 100 > depth.mc_left.blue
+        is_obstacle_right = depth.mc_right.nonblue - 100 > depth.mc_right.blue
+        is_marker_centered = abs(x_error) < self.params.centering_threshold_x
+        is_marker_left = x_error <= -self.params.centering_threshold_x
+        is_marker_right = x_error >= self.params.centering_threshold_x
+
+        if is_obstacle_left and not is_marker_left:
             self.node.get_logger().warning(
-                "CENTERING: Obstacle on the left, moving RIGHT.",
+                "CENTERING: Obstacle on the left, "
+                "marker on the right, "
+                "moving RIGHT.",
                 throttle_duration_sec=1.0
             )
             self.drone.move_right(self.params.sideway_speed)
             return True
         
-        elif depth.mc_right.nonblue - 100 > depth.mc_right.blue:
+        elif is_obstacle_right and not is_marker_right:
             self.node.get_logger().warning(
-                "CENTERING: Obstacle on the right, moving LEFT.",
+                "CENTERING: Obstacle on the right, "
+                "marker on the left, "
+                "moving LEFT.",
                 throttle_duration_sec=1.0
             )
             self.drone.move_left(self.params.sideway_speed)
