@@ -18,7 +18,7 @@ from std_srvs.srv import Trigger
 from .state_machine import MissionState, MissionManager
 from .controller import DroneInterface
 from .utils import ParameterLoader
-from .aruco import ArucoMarkerHandler
+from .aruco import ArucoMarkerHandler, ExitMarkerHandler
 
 
 class MissionControl(Node):
@@ -51,9 +51,14 @@ class MissionControl(Node):
             node=self,
             drone_id=self.params.drone_id,
             priority_markers=self.params.priority_markers,
-            exit_markers=self.params.exit_markers,
             on_marker_locked_callback=self._on_marker_locked,
             on_marker_lost_callback=self._on_marker_lost
+        )
+
+        # Initialize Exit Marker Handler
+        self.exit_marker_handler = ExitMarkerHandler(
+            priority_markers=set(self.params.priority_markers),
+            exit_markers=set(self.params.exit_markers),
         )
         
         # Initialize mission manager
@@ -122,7 +127,7 @@ class MissionControl(Node):
                 return
             
             # Check for exit marker proximity
-            if self.marker_handler.is_near_exit_marker(msg):
+            if self.exit_marker_handler.is_near_exit_marker(msg):
                 self.mission_manager.is_near_exit = True
             else:
                 self.mission_manager.is_near_exit = False

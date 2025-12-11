@@ -34,7 +34,6 @@ class ArucoMarkerHandler:
         node: Node,
         drone_id: str,
         priority_markers: Set[int],
-        exit_markers: Set[int],
         on_marker_locked_callback: Callable,
         on_marker_lost_callback: Callable
     ):
@@ -45,7 +44,6 @@ class ArucoMarkerHandler:
             node: Parent ROS2 node for logging and service clients
             drone_id: Unique identifier for this drone
             priority_markers: Set of high-priority marker IDs
-            exit_markers: Set of exit marker IDs
             on_marker_locked_callback: Called when marker successfully locked (marker_id)
             on_marker_lost_callback: Called when marker timeout expires
         """
@@ -53,7 +51,6 @@ class ArucoMarkerHandler:
         self.logger = node.get_logger()
         self.drone_id = drone_id
         self.priority_markers = priority_markers
-        self.exit_markers = exit_markers
         self.cutoff_id = max(priority_markers) + 1
 
         # Callbacks to notify mission control
@@ -409,26 +406,6 @@ class ArucoMarkerHandler:
         future = self.mark_landed_client.call_async(req)
         
         self.logger.info(f"Marked marker {self.locked_on_marker_id} as landed")
-
-    def is_near_exit_marker(self, msg: ArucoDetection) -> bool:
-        """
-        Check if near any exit marker.
-        
-        Args:
-            msg: ArucoDetection message containing detected markers
-
-        Returns:
-            True if near any exit marker, False otherwise.
-        """
-        for marker in msg.markers:
-            if marker.marker_id >= self.cutoff_id:
-                x = marker.pose.position.x
-                y = marker.pose.position.y
-                z = marker.pose.position.z
-                distance = np.sqrt(x**2 + y**2 + z**2)
-                if distance < 5.0:  # 5 meters threshold
-                    return True
-        return False
     
     def reset_marker_state(self):
         """Reset all marker tracking state including pending state."""
