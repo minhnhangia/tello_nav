@@ -39,8 +39,9 @@ class MissionControl(Node):
             self._on_action_fail
         )
         
-        # Initialize takeoff service server
+        # Initialize takeoff and landing service servers
         self._setup_takeoff_server()
+        self._setup_landing_server()
         
         # Initialize ArUco subscriber
         self._setup_aruco_sub()
@@ -80,6 +81,14 @@ class MissionControl(Node):
             Trigger,
             'takeoff',
             self._handle_takeoff_request
+        )
+
+    def _setup_landing_server(self):
+        """Initialize landing service server."""
+        self.landing_srv = self.create_service(
+            Trigger,
+            'land',
+            self._handle_landing_request
         )
         
     def _setup_aruco_sub(self):
@@ -139,7 +148,7 @@ class MissionControl(Node):
         if self.mission_state != MissionState.IDLE:
             response.success = False
             response.message = (
-                f"Cannot take off: Current state is {self.mission_state.name}, not IDLE."
+                f"Cannot takeoff: Current state is {self.mission_state.name}, not IDLE."
             )
             self.get_logger().warning(response.message)
             return response
@@ -148,6 +157,25 @@ class MissionControl(Node):
         self.mission_state = MissionState.TAKING_OFF
         response.success = True
         response.message = "Takeoff initiated."
+        return response
+    
+    def _handle_landing_request(self, request, response):
+        """Handle landing service request."""
+        if self.mission_state in [
+            MissionState.LANDING,
+            MissionState.COMPLETING_MISSION,
+            MissionState.RESETTING,
+            MissionState.IDLE
+        ]:
+            response.success = False
+            response.message = "Landing already in progress."
+            self.get_logger().warning(response.message)
+            return response
+        
+        self.get_logger().info("Landing requested. Transitioning to LANDING state.")
+        self.mission_state = MissionState.LANDING
+        response.success = True
+        response.message = "Landing initiated."
         return response
     
     def _renew_marker_reservation(self):
