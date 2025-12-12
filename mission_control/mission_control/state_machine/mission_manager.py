@@ -9,6 +9,9 @@ from .mission_context import MissionContext
 from .logic import (
     TakingOffState,
     AscendingState,
+    WaypointCenteringState,
+    WaypointApproachingState,
+    WaypointActionState,
     SearchingState,
     CenteringState,
     ApproachingState,
@@ -19,7 +22,7 @@ from .logic import (
     ResettingState,
 )
 from ..controller import DroneInterface
-from ..aruco import ArucoMarkerHandler
+from ..aruco import ArucoMarkerHandler, WaypointManager
 from ..utils import ParameterLoader
 
 StateRegistry = Dict[MissionState, BaseState]
@@ -40,6 +43,7 @@ class MissionManager:
         node: Node,
         drone: DroneInterface,
         marker_handler: ArucoMarkerHandler,
+        waypoint_manager: Optional[WaypointManager],
         params: ParameterLoader
     ):
         """
@@ -49,11 +53,13 @@ class MissionManager:
             node: ROS2 node for logging
             drone: Drone interface for control and telemetry
             marker_handler: ArUco marker coordination handler
+            waypoint_manager: Waypoint navigation manager (None if disabled)
             params: Parameter loader with configuration
         """
         self.node = node
         self.drone = drone
         self.marker_handler = marker_handler
+        self.waypoint_manager = waypoint_manager
         self.params = params
         
         # Shared mission context
@@ -69,11 +75,14 @@ class MissionManager:
         Returns:
             Dictionary mapping MissionState enum to state instance
         """
-        common_args = (self.node, self.drone, self.marker_handler, self.params, self.context)
+        common_args = (self.node, self.drone, self.marker_handler, self.waypoint_manager, self.params, self.context)
         
         return {
             MissionState.TAKING_OFF: TakingOffState(*common_args),
             MissionState.ASCENDING: AscendingState(*common_args),
+            MissionState.WAYPOINT_CENTERING: WaypointCenteringState(*common_args),
+            MissionState.WAYPOINT_APPROACHING: WaypointApproachingState(*common_args),
+            MissionState.WAYPOINT_ACTION: WaypointActionState(*common_args),
             MissionState.SEARCHING: SearchingState(*common_args),
             MissionState.CENTERING: CenteringState(*common_args),
             MissionState.APPROACHING: ApproachingState(*common_args),
