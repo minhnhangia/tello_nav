@@ -28,7 +28,7 @@ class ParameterLoader:
         self.node.declare_parameter('enable_waypoint_navigation', True)
         self.node.declare_parameter('waypoint_timeout_s', 10.0)
         self.node.declare_parameter('waypoint_sequence', [''])
-        self.node.declare_parameter('waypoint_max_approach_dist', 5.0)
+        self.node.declare_parameter('waypoint_max_approach_dist', 4.0)
         self.node.declare_parameter('waypoint_step_approach_dist', 1.0)
         
         # SEARCHING state parameters
