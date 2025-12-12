@@ -46,7 +46,7 @@ class SearchingState(BaseState):
         return None
     
     def _wait_for_sensor_data(self):
-        self.node.get_logger().info(
+        self.node.get_logger().debug(
             'SEARCHING: Waiting for sensor data...',
             throttle_duration_sec=5
         )

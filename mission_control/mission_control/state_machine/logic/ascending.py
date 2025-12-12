@@ -11,7 +11,7 @@ class AscendingState(BaseState):
     def execute(self) -> Optional[MissionState]:
         """Execute ASCENDING state logic."""        
         if self.drone.latest_height < self.params.initial_search_height:
-            self.node.get_logger().info(
+            self.node.get_logger().debug(
                 f"ASCENDING: Current height {self.drone.latest_height:.2f}m. "
                 f"Ascending to {self.params.initial_search_height:.2f}m.",
                 throttle_duration_sec=2.0

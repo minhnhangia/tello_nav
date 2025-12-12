@@ -29,7 +29,7 @@ class ApproachingState(BaseState):
         return None
     
     def _hover_on_temporary_marker_lost(self):
-        self.node.get_logger().info(
+        self.node.get_logger().debug(
             "APPROACHING: Marker temporarily lost. Hovering...",
             throttle_duration_sec=2.0
         )

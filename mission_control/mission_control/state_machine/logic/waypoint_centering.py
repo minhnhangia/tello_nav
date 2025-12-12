@@ -65,7 +65,7 @@ class WaypointCenteringState(BaseState):
             return None
     
     def _wait_for_sensor_data(self):
-        self.node.get_logger().info(
+        self.node.get_logger().debug(
             'WAYPOINT_CENTERING: Waiting for sensor data...',
             throttle_duration_sec=5
         )
@@ -92,7 +92,7 @@ class WaypointCenteringState(BaseState):
                                        is_headon_detected)
         
         if is_safe_to_move_forward:
-            self.node.get_logger().info(
+            self.node.get_logger().debug(
                 "WAYPOINT_CENTERING: Marker temporarily lost. Moving forward to find...",
                 throttle_duration_sec=2.0
             )
@@ -101,7 +101,7 @@ class WaypointCenteringState(BaseState):
             self._hover_on_temporary_marker_lost()
     
     def _hover_on_temporary_marker_lost(self):
-        self.node.get_logger().info(
+        self.node.get_logger().debug(
             "WAYPOINT_CENTERING: Marker temporarily lost. Hovering...",
             throttle_duration_sec=2.0
         )
@@ -117,7 +117,7 @@ class WaypointCenteringState(BaseState):
             kp=self.params.centering_yaw_kp,
             max_speed=self.params.centering_yaw_speed
         )
-        self.node.get_logger().info(
+        self.node.get_logger().debug(
             f"WAYPOINT_CENTERING: Marker {marker_id}, x_error: {x_error:.2f}m, "
             f"yaw_speed: {twist_msg.angular.z:.2f}",
             throttle_duration_sec=1.0
