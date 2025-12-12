@@ -77,10 +77,10 @@ class SearchingState(BaseState):
 
     def _avoid_corner(self):
         self.node.get_logger().warning(
-            "SEARCHING: Corner detected. Turning 150-degree clockwise."
+            "SEARCHING: Corner detected. Turning 75-degree clockwise."
         )
         self.drone.execute_action(
-            'cw 150',
+            'cw 75',
             MissionState.SEARCHING,
             MissionState.SEARCHING
         )
