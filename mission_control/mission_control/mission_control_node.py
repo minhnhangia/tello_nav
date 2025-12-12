@@ -18,7 +18,7 @@ from std_srvs.srv import Trigger
 from .state_machine import MissionState, MissionManager
 from .controller import DroneInterface
 from .utils import ParameterLoader
-from .aruco import ArucoMarkerHandler, ExitMarkerHandler
+from .aruco import ArucoMarkerHandler, ExitMarkerHandler, WaypointManager
 
 
 class MissionControl(Node):
@@ -61,11 +61,25 @@ class MissionControl(Node):
             exit_markers=set(self.params.exit_markers),
         )
         
-        # Initialize mission manager
+        # Initialize waypoint manager
+        if self.params.enable_waypoint_navigation:
+            self.waypoint_manager = WaypointManager(
+                node=self,
+                waypoint_sequence=self.params.waypoint_sequence
+            )
+            self.get_logger().info(
+                f"Waypoint navigation enabled with {self.waypoint_manager.get_waypoint_count()} waypoints"
+            )
+        else:
+            self.waypoint_manager = None
+            self.get_logger().info("Waypoint navigation disabled")
+        
+        # Initialize mission manager with all dependencies
         self.mission_manager = MissionManager(
             self,
             self.drone,
             self.marker_handler,
+            self.waypoint_manager,
             self.params
         )
         
@@ -120,6 +134,15 @@ class MissionControl(Node):
     
     def _aruco_callback(self, msg: ArucoDetection):
         """Process ArUco detections and coordinate with marker handler."""
+        # Scenario 0: Update waypoint marker pose during waypoint navigation
+        if self.mission_state in [
+            MissionState.WAYPOINT_CENTERING,
+            MissionState.WAYPOINT_APPROACHING
+        ]:
+            if self.waypoint_manager:
+                self.waypoint_manager.update_marker_pose(msg)
+            return
+        
         # Scenario 1: Searching and found a marker
         if self.mission_state == MissionState.SEARCHING and len(msg.markers) > 0:
             if self.marker_handler.process_aruco_detection_for_search(msg):

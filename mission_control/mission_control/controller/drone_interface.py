@@ -57,6 +57,7 @@ class DroneInterface:
         self.latest_tof: Optional[float] = None
         self.latest_depth_analysis: Optional[DepthMapAnalysis] = None
         self.latest_height: float = 0.0
+        self.latest_heading: int = 0
         self.latest_battery: int = 100
 
     def _setup_pubs_subs(self):
@@ -117,15 +118,16 @@ class DroneInterface:
     def _flight_data_callback(self, msg: FlightData):
         """Internal callback for flight data updates with battery monitoring."""
         self.latest_height = float(msg.tof) / 100.0
+        self.latest_heading = msg.yaw
         self.latest_battery = msg.bat
         
         # Battery status warnings
-        if self.latest_battery < 20:
+        if self.is_battery_critical():
             self.node.get_logger().error(
                 f"CRITICAL: Battery at {self.latest_battery}%",
                 throttle_duration_sec=10.0
             )
-        elif self.latest_battery < 50:
+        elif self.is_battery_low():
             self.node.get_logger().warning(
                 f"Battery at {self.latest_battery}%",
                 throttle_duration_sec=20.0
@@ -223,6 +225,10 @@ class DroneInterface:
     def get_height(self) -> float:
         """Get current height above ground in meters."""
         return self.latest_height
+    
+    def get_heading(self) -> int:
+        """Get current heading (yaw) in degrees."""
+        return self.latest_heading
     
     def get_battery_percent(self) -> int:
         """Get current battery percentage (0-100)."""

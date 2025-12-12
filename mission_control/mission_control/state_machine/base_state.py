@@ -7,7 +7,7 @@ from rclpy.node import Node
 from .states import MissionState
 from .mission_context import MissionContext
 from ..controller import DroneInterface
-from ..aruco import ArucoMarkerHandler
+from ..aruco import ArucoMarkerHandler, WaypointManager
 from ..utils import ParameterLoader
 
 
@@ -18,13 +18,14 @@ class BaseState(ABC):
     Each concrete state implements the execute() method containing its specific logic.
     """
     
-    __slots__ = ('node', 'drone', 'marker_handler', 'params', 'context')
+    __slots__ = ('node', 'drone', 'marker_handler', 'waypoint_manager', 'params', 'context')
     
     def __init__(
         self,
         node: Node,
         drone: DroneInterface,
         marker_handler: ArucoMarkerHandler,
+        waypoint_manager: Optional[WaypointManager],
         params: ParameterLoader,
         context: MissionContext
     ):
@@ -35,12 +36,14 @@ class BaseState(ABC):
             node: ROS2 node for logging
             drone: Drone interface for control and telemetry
             marker_handler: ArUco marker coordination handler
+            waypoint_manager: Waypoint navigation manager (None if disabled)
             params: Parameter loader with configuration
             context: Shared mission context for runtime state
         """
         self.node = node
         self.drone = drone
         self.marker_handler = marker_handler
+        self.waypoint_manager = waypoint_manager
         self.params = params
         self.context = context
     
