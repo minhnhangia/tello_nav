@@ -23,6 +23,11 @@ class ParameterLoader:
         self.node.declare_parameter('min_takeoff_height', 0.3)
         self.node.declare_parameter('initial_search_height', 1.0)
         self.node.declare_parameter('ascending_speed', 0.2)
+
+        # WAYPOINT navigation parameters
+        self.node.declare_parameter('enable_waypoint_navigation', True)
+        self.node.declare_parameter('waypoint_timeout_s', 10.0)
+        self.node.declare_parameter('waypoint_sequence', [''])
         
         # SEARCHING state parameters
         self.node.declare_parameter('yaw_speed', 0.5)
@@ -62,6 +67,14 @@ class ParameterLoader:
         self.min_takeoff_height = self.node.get_parameter('min_takeoff_height').get_parameter_value().double_value
         self.initial_search_height = self.node.get_parameter('initial_search_height').get_parameter_value().double_value
         self.ascending_speed = self.node.get_parameter('ascending_speed').get_parameter_value().double_value
+
+        # Waypoint Navigation
+        self.enable_waypoint_navigation = self.node.get_parameter('enable_waypoint_navigation').get_parameter_value().bool_value
+        self.waypoint_timeout = self.node.get_parameter('waypoint_timeout_s').get_parameter_value().double_value
+        
+        # Waypoint sequence - raw string array, parsed by WaypointManager
+        waypoint_param = self.node.get_parameter('waypoint_sequence')
+        self.waypoint_sequence = [s for s in waypoint_param.get_parameter_value().string_array_value if s]
         
         # Searching
         self.yaw_speed = self.node.get_parameter('yaw_speed').get_parameter_value().double_value
