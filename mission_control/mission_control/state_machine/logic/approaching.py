@@ -54,7 +54,7 @@ class ApproachingState(BaseState):
         self.drone.execute_action(
             f'forward {forward_dist_cmd}',
             MissionState.CAMERA_SWITCHING,
-            MissionState.CENTERING
+            MissionState.CAMERA_SWITCHING
         )
 
     def _compute_fwd_dist_cmd(self, forward_dist: float) -> int:

@@ -67,7 +67,7 @@ class WaypointApproachingState(BaseState):
         self.drone.execute_action(
             f'forward {forward_dist_cmd}',
             MissionState.WAYPOINT_ACTION,
-            MissionState.WAYPOINT_CENTERING  # Retry centering on failure
+            MissionState.WAYPOINT_ACTION
         )
     
     def _compute_fwd_dist_cmd(self, forward_dist: float) -> int:
