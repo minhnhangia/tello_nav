@@ -28,6 +28,8 @@ class ParameterLoader:
         self.node.declare_parameter('enable_waypoint_navigation', True)
         self.node.declare_parameter('waypoint_timeout_s', 10.0)
         self.node.declare_parameter('waypoint_sequence', [''])
+        self.node.declare_parameter('waypoint_max_approach_dist', 5.0)
+        self.node.declare_parameter('waypoint_step_approach_dist', 1.0)
         
         # SEARCHING state parameters
         self.node.declare_parameter('yaw_speed', 0.5)
@@ -71,6 +73,8 @@ class ParameterLoader:
         # Waypoint Navigation
         self.enable_waypoint_navigation = self.node.get_parameter('enable_waypoint_navigation').get_parameter_value().bool_value
         self.waypoint_timeout = self.node.get_parameter('waypoint_timeout_s').get_parameter_value().double_value
+        self.waypoint_max_approach_dist = self.node.get_parameter('waypoint_max_approach_dist').get_parameter_value().double_value
+        self.waypoint_step_approach_dist = self.node.get_parameter('waypoint_step_approach_dist').get_parameter_value().double_value
         
         # Waypoint sequence - raw string array, parsed by WaypointManager
         waypoint_param = self.node.get_parameter('waypoint_sequence')

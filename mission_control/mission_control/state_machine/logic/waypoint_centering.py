@@ -43,7 +43,7 @@ class WaypointCenteringState(BaseState):
         x_error = marker_pose.position.x
         forward_dist = marker_pose.position.z
         is_centered = abs(x_error) < self.params.centering_threshold_x
-        is_close_enough = forward_dist < self.params.max_approach_dist
+        is_close_enough = forward_dist < self.params.waypoint_max_approach_dist
         
         # --- 1. OBSTACLE AVOIDANCE ---
         if self._avoid_obstacle_if_needed(depth, x_error):
@@ -159,7 +159,8 @@ class WaypointCenteringState(BaseState):
     
     def _move_closer_to_marker(self, forward_dist: float):
         """Move closer to the marker by a fixed step distance."""
-        step_distance = self.params.step_approach_dist
+        step_distance = max(self.params.waypoint_step_approach_dist,
+                            forward_dist - self.params.waypoint_max_approach_dist)
         current_wp = self.waypoint_manager.get_current_waypoint() if self.waypoint_manager else None
         marker_id = current_wp.marker_id if current_wp else "unknown"
         
