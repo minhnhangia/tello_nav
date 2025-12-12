@@ -78,7 +78,7 @@ class ActionManager:
         try:
             response = future.result()
             if response.rc == TelloAction.Response.OK:
-                self.logger.info("Command accepted by Tello. Waiting for completion...")
+                self.logger.debug("Command accepted by Tello. Waiting for completion...")
                 self.state = ActionState.WAITING_FOR_COMPLETION
                 self.action_start_time = self.node.get_clock().now()
             else:
@@ -100,7 +100,7 @@ class ActionManager:
             return # Ignore unexpected responses
 
         if msg.rc == TelloResponse.OK and msg.str == "ok":
-            self.logger.info(f"Command completed successfully: '{msg.str}'")
+            self.logger.debug(f"Command completed successfully: '{msg.str}'")
             self.on_success_callback(self.pending_next_state) # Notify main node
         else:
             self.logger.error(f"Command failed during execution: '{msg.str}'")
