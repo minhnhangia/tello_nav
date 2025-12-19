@@ -156,15 +156,22 @@ class ActionManager:
 
     def tello_response_callback(self, msg: TelloResponse):
         """Called when a Tello command actually completes (not just accepted)."""
-        if self.state != ActionState.WAITING_FOR_COMPLETION:
-            return # Ignore unexpected responses
+        # Guard 1: Check if we're in a command lifecycle phase
+        # Accept responses during both acceptance and completion phases to avoid race conditions
+        if self.state not in [ActionState.WAITING_FOR_ACCEPTANCE, ActionState.WAITING_FOR_COMPLETION]:
+            return  # Ignore responses when no command is in progress
+        
+        # Guard 2: Verify we actually sent a command
+        if self.pending_command is None:
+            self.logger.warning("Received TelloResponse but no pending command")
+            return
 
         if msg.rc == TelloResponse.OK and msg.str == "ok":
-            self.logger.debug(f"Command completed successfully: '{msg.str}'")
+            self.logger.debug(f"Command '{self.pending_command}' completed successfully: '{msg.str}'")
             self.on_success_callback(self.pending_next_state)
             self.reset()
         else:
-            self.logger.error(f"Command failed during execution: '{msg.str}'")
+            self.logger.error(f"Command '{self.pending_command}' failed during execution: '{msg.str}'")
             
             # Attempt retry if available
             if self.retry_count < self.max_retries:
