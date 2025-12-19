@@ -21,6 +21,16 @@ class WaypointCenteringState(BaseState):
             )
             return MissionState.SEARCHING
         
+        # Start search timer on first entry (after STANDBY delay)
+        # This ensures timeout only counts time spent actively searching
+        if self.waypoint_manager.marker_last_seen_time is None:
+            self.waypoint_manager.start_search_timer()
+            current_wp = self.waypoint_manager.get_current_waypoint()
+            marker_id = current_wp.marker_id if current_wp else "unknown"
+            self.node.get_logger().info(
+                f"WAYPOINT_CENTERING: Starting search for waypoint marker {marker_id}"
+            )
+        
         # Check for marker timeout
         if self.waypoint_manager.check_marker_timeout(self.params.waypoint_timeout):
             self._handle_permanent_marker_lost()

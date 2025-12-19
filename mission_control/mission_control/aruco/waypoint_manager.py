@@ -58,6 +58,7 @@ class WaypointManager:
         # Current state
         self.current_index = 0
         self.marker_pose: Optional[Pose] = None
+        # Timeout timer starts when drone begins searching, not when waypoint is created
         self.marker_last_seen_time: Optional[Time] = None
         
         if self.waypoints:
@@ -177,6 +178,14 @@ class WaypointManager:
         """
         return self.marker_pose is not None
     
+    def start_search_timer(self):
+        """
+        Start or restart the search timeout timer.
+        
+        Should be called when the drone begins actively searching for the waypoint
+        """
+        self.marker_last_seen_time = self.node.get_clock().now()
+    
     def check_marker_timeout(self, timeout_duration: float) -> bool:
         """
         Check if the current waypoint marker has timed out.
@@ -185,16 +194,17 @@ class WaypointManager:
             timeout_duration: Timeout threshold in seconds
             
         Returns:
-            True if marker has been lost longer than timeout, False otherwise
+            True if time since search started exceeds timeout, False otherwise
+            (or False if search hasn't started yet)
         """
         if self.marker_last_seen_time is None:
-            return False
+            return False  # Search hasn't started yet, no timeout
         
-        time_since_last_seen = (
+        elapsed_time = (
             self.node.get_clock().now() - self.marker_last_seen_time
         ).nanoseconds / 1e9
         
-        return time_since_last_seen > timeout_duration
+        return elapsed_time > timeout_duration
     
     def advance_to_next(self) -> bool:
         """
@@ -206,6 +216,7 @@ class WaypointManager:
         self.current_index += 1
         
         # Clear marker state for new waypoint
+        # Timer will be started when search actually begins (start_search_timer())
         self.marker_pose = None
         self.marker_last_seen_time = None
         
