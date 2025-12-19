@@ -13,26 +13,24 @@ class WaypointCenteringState(BaseState):
     
     def execute(self) -> Optional[MissionState]:
         """Execute WAYPOINT_CENTERING state logic with obstacle avoidance and yaw alignment."""
-        # Check waypoint manager availability
-        if self.waypoint_manager is None or self.waypoint_manager.is_sequence_complete():
+        # Check if waypoint sequence is complete
+        if self.waypoint_manager.is_sequence_complete():  # type: ignore
             self.node.get_logger().error(
-                "WAYPOINT_CENTERING: No waypoint manager or sequence complete. "
+                "WAYPOINT_CENTERING: Waypoint sequence complete. "
                 "Transitioning to SEARCHING."
             )
             return MissionState.SEARCHING
         
         # Start search timer on first entry (after STANDBY delay)
         # This ensures timeout only counts time spent actively searching
-        if self.waypoint_manager.marker_last_seen_time is None:
-            self.waypoint_manager.start_search_timer()
-            current_wp = self.waypoint_manager.get_current_waypoint()
-            marker_id = current_wp.marker_id if current_wp else "unknown"
+        if self.waypoint_manager.marker_last_seen_time is None:  # type: ignore
+            self.waypoint_manager.start_search_timer()  # type: ignore
             self.node.get_logger().info(
-                f"WAYPOINT_CENTERING: Starting search for waypoint marker {marker_id}"
+                f"WAYPOINT_CENTERING: Starting search for waypoint marker {self.waypoint_manager.get_current_marker_id()}"  # type: ignore
             )
         
         # Check for marker timeout
-        if self.waypoint_manager.check_marker_timeout(self.params.waypoint_timeout):
+        if self.waypoint_manager.check_marker_timeout(self.params.waypoint_timeout):  # type: ignore
             self._handle_permanent_marker_lost()
             return MissionState.SEARCHING
         
@@ -82,10 +80,8 @@ class WaypointCenteringState(BaseState):
         self.drone.hover()
     
     def _handle_permanent_marker_lost(self):
-        current_wp = self.waypoint_manager.get_current_waypoint() if self.waypoint_manager else None
-        marker_id = current_wp.marker_id if current_wp else "unknown"
         self.node.get_logger().warning(
-            f"WAYPOINT_CENTERING: Lost waypoint marker {marker_id} for "
+            f"WAYPOINT_CENTERING: Lost waypoint marker {self.waypoint_manager.get_current_marker_id()} for "  # type: ignore
             f">{self.params.waypoint_timeout}s. Aborting to SEARCHING."
         )
     
@@ -118,9 +114,6 @@ class WaypointCenteringState(BaseState):
         self.drone.hover()
     
     def _perform_yaw_centering(self, x_error: float):
-        current_wp = self.waypoint_manager.get_current_waypoint() if self.waypoint_manager else None
-        marker_id = current_wp.marker_id if current_wp else "unknown"
-        
         twist_msg = Twist()
         twist_msg.angular.z = self._compute_speed(
             error=x_error,
@@ -128,7 +121,7 @@ class WaypointCenteringState(BaseState):
             max_speed=self.params.centering_yaw_speed
         )
         self.node.get_logger().debug(
-            f"WAYPOINT_CENTERING: Marker {marker_id}, x_error: {x_error:.2f}m, "
+            f"WAYPOINT_CENTERING: Marker {self.waypoint_manager.get_current_marker_id()}, x_error: {x_error:.2f}m, "  # type: ignore
             f"yaw_speed: {twist_msg.angular.z:.2f}",
             throttle_duration_sec=1.0
         )
@@ -159,10 +152,8 @@ class WaypointCenteringState(BaseState):
         return False
     
     def _handle_successful_centering(self):
-        current_wp = self.waypoint_manager.get_current_waypoint() if self.waypoint_manager else None
-        marker_id = current_wp.marker_id if current_wp else "unknown"
         self.node.get_logger().info(
-            f"WAYPOINT_CENTERING: Centered on waypoint marker {marker_id}. "
+            f"WAYPOINT_CENTERING: Centered on waypoint marker {self.waypoint_manager.get_current_marker_id()}. "  # type: ignore
             "Transitioning to WAYPOINT_APPROACHING."
         )
         self.drone.hover()
@@ -171,11 +162,9 @@ class WaypointCenteringState(BaseState):
         """Move closer to the marker by a fixed step distance."""
         step_distance = max(self.params.waypoint_step_approach_dist,
                             forward_dist - self.params.waypoint_max_approach_dist)
-        current_wp = self.waypoint_manager.get_current_waypoint() if self.waypoint_manager else None
-        marker_id = current_wp.marker_id if current_wp else "unknown"
         
         self.node.get_logger().info(
-            f"WAYPOINT_CENTERING: Centered but far from waypoint {marker_id} "
+            f"WAYPOINT_CENTERING: Centered but far from waypoint {self.waypoint_manager.get_current_marker_id()} "  # type: ignore
             f"({forward_dist:.2f}m). Moving closer by {step_distance:.2f}m."
         )
         self.drone.execute_action(
