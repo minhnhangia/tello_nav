@@ -7,6 +7,7 @@ This module re-exports state classes for convenient imports, e.g.:
 
 from .taking_off import TakingOffState
 from .ascending import AscendingState
+from .standby import StandbyState
 from .waypoint_centering import WaypointCenteringState
 from .waypoint_approaching import WaypointApproachingState
 from .waypoint_action import WaypointActionState
@@ -22,6 +23,7 @@ from .resetting import ResettingState
 __all__ = [
     "TakingOffState",
     "AscendingState",
+    "StandbyState",
     "WaypointCenteringState",
     "WaypointApproachingState",
     "WaypointActionState",

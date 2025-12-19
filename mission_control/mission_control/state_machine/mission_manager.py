@@ -9,6 +9,7 @@ from .mission_context import MissionContext
 from .logic import (
     TakingOffState,
     AscendingState,
+    StandbyState,
     WaypointCenteringState,
     WaypointApproachingState,
     WaypointActionState,
@@ -80,6 +81,7 @@ class MissionManager:
         return {
             MissionState.TAKING_OFF: TakingOffState(*common_args),
             MissionState.ASCENDING: AscendingState(*common_args),
+            MissionState.STANDBY: StandbyState(*common_args),
             MissionState.WAYPOINT_CENTERING: WaypointCenteringState(*common_args),
             MissionState.WAYPOINT_APPROACHING: WaypointApproachingState(*common_args),
             MissionState.WAYPOINT_ACTION: WaypointActionState(*common_args),

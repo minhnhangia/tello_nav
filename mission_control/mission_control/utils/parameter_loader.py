@@ -23,6 +23,9 @@ class ParameterLoader:
         self.node.declare_parameter('min_takeoff_height', 0.3)
         self.node.declare_parameter('initial_search_height', 1.0)
         self.node.declare_parameter('ascending_speed', 0.2)
+        
+        # STANDBY state parameters
+        self.node.declare_parameter('standby_delay', 5.0)
 
         # WAYPOINT navigation parameters
         self.node.declare_parameter('enable_waypoint_navigation', True)
@@ -69,6 +72,9 @@ class ParameterLoader:
         self.min_takeoff_height = self.node.get_parameter('min_takeoff_height').get_parameter_value().double_value
         self.initial_search_height = self.node.get_parameter('initial_search_height').get_parameter_value().double_value
         self.ascending_speed = self.node.get_parameter('ascending_speed').get_parameter_value().double_value
+        
+        # Standby
+        self.standby_delay = self.node.get_parameter('standby_delay').get_parameter_value().double_value
 
         # Waypoint Navigation
         self.enable_waypoint_navigation = self.node.get_parameter('enable_waypoint_navigation').get_parameter_value().bool_value
