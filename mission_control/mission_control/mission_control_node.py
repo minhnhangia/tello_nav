@@ -13,6 +13,7 @@ import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
 from aruco_opencv_msgs.msg import ArucoDetection
+from std_msgs.msg import UInt8
 from std_srvs.srv import Trigger
 
 from .state_machine import MissionState, MissionManager
@@ -85,6 +86,14 @@ class MissionControl(Node):
         
         # Current mission state
         self.mission_state = MissionState.IDLE
+        state_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+        self.state_pub = self.create_publisher(UInt8, 'mission_state', state_qos)
+        self._last_published_state = None
         
         # Start main control loops
         self.main_timer = self.create_timer(0.25, self._main_logic_loop)  # 4 Hz
@@ -127,6 +136,15 @@ class MissionControl(Node):
             qos_profile
         )
         
+    def _publish_mission_state(self):
+        """Publish mission state transitions for monitoring dashboards."""
+        current_value = self.mission_state.value
+        if current_value == self._last_published_state:
+            return
+        msg = UInt8()
+        msg.data = current_value
+        self.state_pub.publish(msg)
+        self._last_published_state = current_value
 
     # ========================================================================
     # ROS2 CALLBACK METHODS
@@ -156,8 +174,8 @@ class MissionControl(Node):
                 self.mission_manager.is_near_exit = False
             return
         
-        # Scenario 2: Centering/approaching and may need to switch to priority marker
-        if self.mission_state in [MissionState.CENTERING, MissionState.APPROACHING]:
+        # Scenario 2: Centering and may need to switch to priority marker
+        if self.mission_state in [MissionState.CENTERING]:
             if self.marker_handler.should_switch_to_priority_marker(msg):
                 if self.marker_handler.process_aruco_detection_for_search(msg):
                     self.mission_state = MissionState.LOCKING_ON
@@ -260,6 +278,8 @@ class MissionControl(Node):
         
         Delegates state execution to the MissionManager.
         """
+        self._publish_mission_state()
+        
         # Check for action timeouts
         self.drone.check_timeout()
         
