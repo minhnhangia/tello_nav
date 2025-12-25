@@ -135,7 +135,8 @@ class ArucoMarkerHandler:
 
         if priority_markers_avail:
             # Found priority marker(s) - select closest one
-            priority_marker = min(priority_markers_avail, key=lambda m: m.pose.position.z)
+            priority_marker = min(priority_markers_avail, 
+                                  key=lambda m: m.pose.position.z**2 + m.pose.position.x**2)
             return priority_marker
 
         return None
@@ -200,7 +201,8 @@ class ArucoMarkerHandler:
             return priority_marker
         
         # Step 3: No priority markers - select closest available marker
-        best_marker = min(available_markers, key=lambda m: m.pose.position.z)
+        best_marker = min(available_markers, 
+                          key=lambda m: m.pose.position.z**2 + m.pose.position.x**2)
         distance = best_marker.pose.position.z
         self.logger.info(
             f"Selected closest marker {best_marker.marker_id} at {distance:.2f}m "
