@@ -48,6 +48,7 @@ class ParameterLoader:
         self.node.declare_parameter('marker_timeout_s', 2.5)
         self.node.declare_parameter('max_approach_dist', 2.5)
         self.node.declare_parameter('step_approach_dist', 0.6)
+        self.node.declare_parameter('centering_forward_speed', 0.15)
         
         # APPROACHING state parameters
         self.node.declare_parameter('final_approach_offset', 0.35)
@@ -100,6 +101,7 @@ class ParameterLoader:
         self.marker_timeout = self.node.get_parameter('marker_timeout_s').get_parameter_value().double_value
         self.max_approach_dist = self.node.get_parameter('max_approach_dist').get_parameter_value().double_value
         self.step_approach_dist = self.node.get_parameter('step_approach_dist').get_parameter_value().double_value
+        self.centering_forward_speed = self.node.get_parameter('centering_forward_speed').get_parameter_value().double_value
         
         # Approaching
         self.final_approach_offset = self.node.get_parameter('final_approach_offset').get_parameter_value().double_value

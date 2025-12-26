@@ -89,7 +89,7 @@ class CenteringState(BaseState):
                 "CENTERING: Marker temporarily lost. Moving forward to find...",
                 throttle_duration_sec=2.0
             )
-            self.drone.move_forward(self.params.forward_speed)
+            self.drone.move_forward(self.params.centering_forward_speed)
         else:
             self._hover_on_temporary_marker_lost()
 
