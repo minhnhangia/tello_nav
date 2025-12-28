@@ -37,7 +37,7 @@ class ApproachingState(BaseState):
 
     def _move_to_marker(self):
         """Move forward to directly above marker."""
-        marker_pose: Pose = self.marker_handler.get_locked_marker_pose()
+        marker_pose: Pose = self.marker_handler.get_locked_marker_pose()    # type: ignore
         if marker_pose is None:
             return
         
@@ -54,7 +54,8 @@ class ApproachingState(BaseState):
         self.drone.execute_action(
             f'forward {forward_dist_cmd}',
             MissionState.CAMERA_SWITCHING,
-            MissionState.CAMERA_SWITCHING
+            MissionState.SEARCHING,
+            max_retries=2
         )
 
     def _compute_fwd_dist_cmd(self, forward_dist: float) -> int:
