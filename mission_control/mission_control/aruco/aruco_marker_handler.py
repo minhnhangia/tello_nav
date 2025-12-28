@@ -12,6 +12,7 @@ from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoS
 from aruco_opencv_msgs.msg import ArucoDetection
 from geometry_msgs.msg import Pose
 from std_msgs.msg import Int32, Int32MultiArray
+from swarm_interfaces.msg import MarkerHeartbeat
 from swarm_interfaces.srv import ReserveMarker, MarkLanded
 
 from typing import Optional, Set, Callable
@@ -91,6 +92,18 @@ class ArucoMarkerHandler:
             Int32,
             'locked_marker_id',
             locked_marker_qos
+        )
+        
+        # Publisher for marker heartbeats (reservation renewal)
+        heartbeat_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+        self.marker_heartbeat_pub = self.node.create_publisher(
+            MarkerHeartbeat,
+            '/marker_heartbeat',
+            heartbeat_qos
         )
         
         # Subscribe to unavailable markers from the swarm coordinator
@@ -423,12 +436,15 @@ class ArucoMarkerHandler:
         self.logger.info(f"Unreserved marker {marker_id}")
     
     def renew_marker_reservation(self):
-        """Renew reservation for the currently locked marker."""
+        """Publish heartbeat to renew reservation for the currently locked marker."""
         if self.locked_on_marker_id < 0:
             return
         
-        # Silent renewal - no response handling needed
-        self.request_marker_lock(self.locked_on_marker_id, handle_response=False)
+        msg = MarkerHeartbeat()
+        msg.drone_id = self.drone_id
+        msg.marker_id = self.locked_on_marker_id
+        
+        self.marker_heartbeat_pub.publish(msg)
     
     def mark_current_marker_landed(self):
         """Mark the currently locked marker as successfully landed."""
