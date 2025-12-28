@@ -37,7 +37,7 @@ class ParameterLoader:
         # SEARCHING state parameters
         self.node.declare_parameter('yaw_speed', 0.5)
         self.node.declare_parameter('forward_speed', 0.2)
-        self.node.declare_parameter('sideway_speed', 0.1)
+        self.node.declare_parameter('sideway_speed', 0.12)
         self.node.declare_parameter('corner_tof_threshold', 0.9)
         self.node.declare_parameter('headon_tof_threshold', 0.5)
         
