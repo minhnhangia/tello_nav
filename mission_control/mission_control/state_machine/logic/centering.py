@@ -84,7 +84,12 @@ class CenteringState(BaseState):
                                        is_corner_detected or 
                                        is_headon_detected)
 
-        if is_safe_to_move_forward:
+        # Check if already close enough based on last known position
+        last_pose = self.marker_handler.get_last_known_marker_pose()
+        is_close_enough = (last_pose is not None and 
+                           last_pose.position.z < self.params.max_approach_dist)
+
+        if is_safe_to_move_forward and not is_close_enough:
             self.node.get_logger().debug(
                 "CENTERING: Marker temporarily lost. Moving forward to find...",
                 throttle_duration_sec=2.0

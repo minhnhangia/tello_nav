@@ -61,6 +61,7 @@ class ArucoMarkerHandler:
         # Marker state tracking
         self.locked_on_marker_id = -1
         self.locked_on_marker_pose: Optional[Pose] = None
+        self.last_known_marker_pose: Optional[Pose] = None  # Persists through detection gaps
         self.marker_last_seen_time = node.get_clock().now()
         
         # Pending state (pre-lock validation)
@@ -301,11 +302,13 @@ class ArucoMarkerHandler:
         for marker in msg.markers:
             if marker.marker_id == self.locked_on_marker_id:
                 self.locked_on_marker_pose = marker.pose
+                self.last_known_marker_pose = marker.pose  # Persist last known pose
                 marker_found = True
                 self.marker_last_seen_time = self.node.get_clock().now()
                 break
         
         # If the locked-on marker is no longer visible, set pose to None
+        # but keep last_known_marker_pose for recovery
         if not marker_found:
             self.locked_on_marker_pose = None
 
@@ -352,6 +355,7 @@ class ArucoMarkerHandler:
             if response.success:
                 self.locked_on_marker_id = marker_id
                 self.locked_on_marker_pose = self._pending_marker_pose
+                self.last_known_marker_pose = self._pending_marker_pose
                 self.marker_last_seen_time = self._pending_marker_time
                 
                 self.logger.info(
@@ -377,6 +381,7 @@ class ArucoMarkerHandler:
                 )
                 self.locked_on_marker_id = -1
                 self.locked_on_marker_pose = None
+                self.last_known_marker_pose = None
                 self._clear_pending_state()
                 
                 # Publish reset marker ID
@@ -390,6 +395,7 @@ class ArucoMarkerHandler:
             self.logger.error(f'Marker lock service call failed: {e}')
             self.locked_on_marker_id = -1
             self.locked_on_marker_pose = None
+            self.last_known_marker_pose = None
             self._clear_pending_state()
             self._publish_locked_marker_id()
             self.on_marker_lost()
@@ -440,6 +446,7 @@ class ArucoMarkerHandler:
         """Reset all marker tracking state including pending state."""
         self.locked_on_marker_id = -1
         self.locked_on_marker_pose = None
+        self.last_known_marker_pose = None
         self._clear_pending_state()
         with self._unavailable_markers_lock:
             self.unavailable_markers.clear()
@@ -453,6 +460,10 @@ class ArucoMarkerHandler:
     def get_locked_marker_pose(self) -> Optional[Pose]:
         """Get the latest pose of the locked marker (None if not visible)."""
         return self.locked_on_marker_pose
+    
+    def get_last_known_marker_pose(self) -> Optional[Pose]:
+        """Get the last known pose of the locked marker (persists through detection gaps)."""
+        return self.last_known_marker_pose
     
     def is_marker_locked(self) -> bool:
         """Check if a marker is currently locked."""
