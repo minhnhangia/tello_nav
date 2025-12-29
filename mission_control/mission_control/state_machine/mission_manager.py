@@ -6,21 +6,7 @@ from rclpy.node import Node
 from .states import MissionState
 from .base_state import BaseState
 from .mission_context import MissionContext
-from .logic import (
-    TakingOffState,
-    AscendingState,
-    WaypointCenteringState,
-    WaypointApproachingState,
-    WaypointActionState,
-    SearchingState,
-    CenteringState,
-    ApproachingState,
-    CameraSwitchingState,
-    PrecisionLandingState,
-    LandingState,
-    CompletingMissionState,
-    ResettingState,
-)
+from .logic import *
 from ..controller import DroneInterface
 from ..aruco import ArucoMarkerHandler, WaypointManager
 from ..utils import ParameterLoader
@@ -80,6 +66,7 @@ class MissionManager:
         return {
             MissionState.TAKING_OFF: TakingOffState(*common_args),
             MissionState.ASCENDING: AscendingState(*common_args),
+            MissionState.STANDBY: StandbyState(*common_args),
             MissionState.WAYPOINT_CENTERING: WaypointCenteringState(*common_args),
             MissionState.WAYPOINT_APPROACHING: WaypointApproachingState(*common_args),
             MissionState.WAYPOINT_ACTION: WaypointActionState(*common_args),

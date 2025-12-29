@@ -8,9 +8,11 @@ for the Mission Control system.
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
 from aruco_opencv_msgs.msg import ArucoDetection
 from geometry_msgs.msg import Pose
-from std_msgs.msg import Int32MultiArray
+from std_msgs.msg import Int32, Int32MultiArray
+from swarm_interfaces.msg import MarkerHeartbeat
 from swarm_interfaces.srv import ReserveMarker, MarkLanded
 
 from typing import Optional, Set, Callable
@@ -60,6 +62,7 @@ class ArucoMarkerHandler:
         # Marker state tracking
         self.locked_on_marker_id = -1
         self.locked_on_marker_pose: Optional[Pose] = None
+        self.last_known_marker_pose: Optional[Pose] = None  # Persists through detection gaps
         self.marker_last_seen_time = node.get_clock().now()
         
         # Pending state (pre-lock validation)
@@ -78,6 +81,31 @@ class ArucoMarkerHandler:
     
     def _setup_communication(self):
         """Setup ROS2 subscriptions and service clients."""
+        # Publisher for locked marker ID (latched for late joiners)
+        locked_marker_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+        self.locked_marker_id_pub = self.node.create_publisher(
+            Int32,
+            'locked_marker_id',
+            locked_marker_qos
+        )
+        
+        # Publisher for marker heartbeats (reservation renewal)
+        heartbeat_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=10
+        )
+        self.marker_heartbeat_pub = self.node.create_publisher(
+            MarkerHeartbeat,
+            '/marker_heartbeat',
+            heartbeat_qos
+        )
+        
         # Subscribe to unavailable markers from the swarm coordinator
         self.unavailable_markers_sub = self.node.create_subscription(
             Int32MultiArray,
@@ -106,6 +134,12 @@ class ArucoMarkerHandler:
         """Update the list of unavailable markers from the swarm coordinator."""
         with self._unavailable_markers_lock:
             self.unavailable_markers = set(msg.data)
+    
+    def _publish_locked_marker_id(self):
+        """Publish the current locked marker ID for monitoring and coordination."""
+        msg = Int32()
+        msg.data = self.locked_on_marker_id
+        self.locked_marker_id_pub.publish(msg)
 
     def _find_priority_marker(self, avail_markers) -> Optional[object]:
         priority_markers_avail = [
@@ -115,7 +149,8 @@ class ArucoMarkerHandler:
 
         if priority_markers_avail:
             # Found priority marker(s) - select closest one
-            priority_marker = min(priority_markers_avail, key=lambda m: m.pose.position.z)
+            priority_marker = min(priority_markers_avail, 
+                                  key=lambda m: m.pose.position.z**2 + m.pose.position.x**2)
             return priority_marker
 
         return None
@@ -180,7 +215,8 @@ class ArucoMarkerHandler:
             return priority_marker
         
         # Step 3: No priority markers - select closest available marker
-        best_marker = min(available_markers, key=lambda m: m.pose.position.z)
+        best_marker = min(available_markers, 
+                          key=lambda m: m.pose.position.z**2 + m.pose.position.x**2)
         distance = best_marker.pose.position.z
         self.logger.info(
             f"Selected closest marker {best_marker.marker_id} at {distance:.2f}m "
@@ -279,11 +315,13 @@ class ArucoMarkerHandler:
         for marker in msg.markers:
             if marker.marker_id == self.locked_on_marker_id:
                 self.locked_on_marker_pose = marker.pose
+                self.last_known_marker_pose = marker.pose  # Persist last known pose
                 marker_found = True
                 self.marker_last_seen_time = self.node.get_clock().now()
                 break
         
         # If the locked-on marker is no longer visible, set pose to None
+        # but keep last_known_marker_pose for recovery
         if not marker_found:
             self.locked_on_marker_pose = None
 
@@ -330,6 +368,7 @@ class ArucoMarkerHandler:
             if response.success:
                 self.locked_on_marker_id = marker_id
                 self.locked_on_marker_pose = self._pending_marker_pose
+                self.last_known_marker_pose = self._pending_marker_pose
                 self.marker_last_seen_time = self._pending_marker_time
                 
                 self.logger.info(
@@ -343,6 +382,9 @@ class ArucoMarkerHandler:
                 # Clear pending state after successful commit
                 self._clear_pending_state()
                 
+                # Publish locked marker ID for monitoring
+                self._publish_locked_marker_id()
+                
                 # Notify mission control of successful lock
                 self.on_marker_locked(marker_id)
             else:
@@ -352,7 +394,11 @@ class ArucoMarkerHandler:
                 )
                 self.locked_on_marker_id = -1
                 self.locked_on_marker_pose = None
+                self.last_known_marker_pose = None
                 self._clear_pending_state()
+                
+                # Publish reset marker ID
+                self._publish_locked_marker_id()
                 
                 # Notify mission control to resume searching
                 self.on_marker_lost()
@@ -362,7 +408,9 @@ class ArucoMarkerHandler:
             self.logger.error(f'Marker lock service call failed: {e}')
             self.locked_on_marker_id = -1
             self.locked_on_marker_pose = None
+            self.last_known_marker_pose = None
             self._clear_pending_state()
+            self._publish_locked_marker_id()
             self.on_marker_lost()
     
     def unreserve_current_marker(self):
@@ -388,12 +436,15 @@ class ArucoMarkerHandler:
         self.logger.info(f"Unreserved marker {marker_id}")
     
     def renew_marker_reservation(self):
-        """Renew reservation for the currently locked marker."""
+        """Publish heartbeat to renew reservation for the currently locked marker."""
         if self.locked_on_marker_id < 0:
             return
         
-        # Silent renewal - no response handling needed
-        self.request_marker_lock(self.locked_on_marker_id, handle_response=False)
+        msg = MarkerHeartbeat()
+        msg.drone_id = self.drone_id
+        msg.marker_id = self.locked_on_marker_id
+        
+        self.marker_heartbeat_pub.publish(msg)
     
     def mark_current_marker_landed(self):
         """Mark the currently locked marker as successfully landed."""
@@ -411,10 +462,12 @@ class ArucoMarkerHandler:
         """Reset all marker tracking state including pending state."""
         self.locked_on_marker_id = -1
         self.locked_on_marker_pose = None
+        self.last_known_marker_pose = None
         self._clear_pending_state()
         with self._unavailable_markers_lock:
             self.unavailable_markers.clear()
         self.marker_last_seen_time = self.node.get_clock().now()
+        self._publish_locked_marker_id()
     
     def get_locked_marker_id(self) -> int:
         """Get the currently locked marker ID (-1 if none)."""
@@ -423,6 +476,10 @@ class ArucoMarkerHandler:
     def get_locked_marker_pose(self) -> Optional[Pose]:
         """Get the latest pose of the locked marker (None if not visible)."""
         return self.locked_on_marker_pose
+    
+    def get_last_known_marker_pose(self) -> Optional[Pose]:
+        """Get the last known pose of the locked marker (persists through detection gaps)."""
+        return self.last_known_marker_pose
     
     def is_marker_locked(self) -> bool:
         """Check if a marker is currently locked."""

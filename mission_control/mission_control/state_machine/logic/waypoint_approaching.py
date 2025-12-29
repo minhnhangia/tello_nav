@@ -11,26 +11,32 @@ class WaypointApproachingState(BaseState):
     
     def execute(self) -> Optional[MissionState]:
         """Execute WAYPOINT_APPROACHING state logic."""
-        # Check waypoint manager availability
-        if self.waypoint_manager is None or self.waypoint_manager.is_sequence_complete():
+        # Check if waypoint sequence is complete
+        if self.waypoint_manager.is_sequence_complete():  # type: ignore
             self.node.get_logger().error(
-                "WAYPOINT_APPROACHING: No waypoint manager or sequence complete. "
+                "WAYPOINT_APPROACHING: Waypoint sequence complete. "
                 "Transitioning to SEARCHING."
             )
             return MissionState.SEARCHING
         
+        # Defensive check: action-only waypoints should not reach this state
+        if self.waypoint_manager.is_current_waypoint_action_only():  # type: ignore
+            self.node.get_logger().warning(
+                "WAYPOINT_APPROACHING: Action-only waypoint detected. "
+                "Transitioning to WAYPOINT_ACTION."
+            )
+            return MissionState.WAYPOINT_ACTION
+        
         # Check for marker timeout
-        if self.waypoint_manager.check_marker_timeout(self.params.waypoint_timeout):
-            current_wp = self.waypoint_manager.get_current_waypoint()
-            marker_id = current_wp.marker_id if current_wp else "unknown"
+        if self.waypoint_manager.check_marker_timeout(self.params.waypoint_timeout):  # type: ignore
             self.node.get_logger().error(
-                f"WAYPOINT_APPROACHING: Lost waypoint marker {marker_id} for "
+                f"WAYPOINT_APPROACHING: Lost waypoint marker {self.waypoint_manager.get_current_marker_id()} for "  # type: ignore
                 f">{self.params.waypoint_timeout}s. Returning to WAYPOINT_CENTERING."
             )
             return MissionState.WAYPOINT_CENTERING
         
         # Check if marker is visible
-        if not self.waypoint_manager.is_marker_visible():
+        if not self.waypoint_manager.is_marker_visible():  # type: ignore
             self._hover_on_temporary_marker_lost()
             return None
         
@@ -46,12 +52,9 @@ class WaypointApproachingState(BaseState):
     
     def _move_to_marker(self):
         """Move forward to waypoint marker position."""
-        marker_pose: Pose = self.waypoint_manager.get_marker_pose() if self.waypoint_manager else None  # type: ignore
+        marker_pose = self.waypoint_manager.get_marker_pose()  # type: ignore
         if marker_pose is None:
             return
-        
-        current_wp = self.waypoint_manager.get_current_waypoint() if self.waypoint_manager else None
-        marker_id = current_wp.marker_id if current_wp else "unknown"
         
         x = marker_pose.position.x
         y = marker_pose.position.y
@@ -59,7 +62,7 @@ class WaypointApproachingState(BaseState):
         forward_dist = z
         
         self.node.get_logger().info(
-            f"WAYPOINT_APPROACHING: Moving to waypoint {marker_id}, "
+            f"WAYPOINT_APPROACHING: Moving to waypoint {self.waypoint_manager.get_current_marker_id()}, "  # type: ignore
             f"forward {forward_dist:.2f}m, x={x:.2f}m, y={y:.2f}m"
         )
         
@@ -67,7 +70,8 @@ class WaypointApproachingState(BaseState):
         self.drone.execute_action(
             f'forward {forward_dist_cmd}',
             MissionState.WAYPOINT_ACTION,
-            MissionState.WAYPOINT_ACTION
+            MissionState.SEARCHING,
+            max_retries=2
         )
     
     def _compute_fwd_dist_cmd(self, forward_dist: float) -> int:

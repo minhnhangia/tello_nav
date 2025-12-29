@@ -23,6 +23,9 @@ class ParameterLoader:
         self.node.declare_parameter('min_takeoff_height', 0.3)
         self.node.declare_parameter('initial_search_height', 1.0)
         self.node.declare_parameter('ascending_speed', 0.2)
+        
+        # STANDBY state parameters
+        self.node.declare_parameter('standby_delay', 5.0)
 
         # WAYPOINT navigation parameters
         self.node.declare_parameter('enable_waypoint_navigation', True)
@@ -34,7 +37,7 @@ class ParameterLoader:
         # SEARCHING state parameters
         self.node.declare_parameter('yaw_speed', 0.5)
         self.node.declare_parameter('forward_speed', 0.2)
-        self.node.declare_parameter('sideway_speed', 0.1)
+        self.node.declare_parameter('sideway_speed', 0.12)
         self.node.declare_parameter('corner_tof_threshold', 0.9)
         self.node.declare_parameter('headon_tof_threshold', 0.5)
         
@@ -45,6 +48,7 @@ class ParameterLoader:
         self.node.declare_parameter('marker_timeout_s', 2.5)
         self.node.declare_parameter('max_approach_dist', 2.5)
         self.node.declare_parameter('step_approach_dist', 0.6)
+        self.node.declare_parameter('centering_forward_speed', 0.15)
         
         # APPROACHING state parameters
         self.node.declare_parameter('final_approach_offset', 0.35)
@@ -69,6 +73,9 @@ class ParameterLoader:
         self.min_takeoff_height = self.node.get_parameter('min_takeoff_height').get_parameter_value().double_value
         self.initial_search_height = self.node.get_parameter('initial_search_height').get_parameter_value().double_value
         self.ascending_speed = self.node.get_parameter('ascending_speed').get_parameter_value().double_value
+        
+        # Standby
+        self.standby_delay = self.node.get_parameter('standby_delay').get_parameter_value().double_value
 
         # Waypoint Navigation
         self.enable_waypoint_navigation = self.node.get_parameter('enable_waypoint_navigation').get_parameter_value().bool_value
@@ -94,6 +101,7 @@ class ParameterLoader:
         self.marker_timeout = self.node.get_parameter('marker_timeout_s').get_parameter_value().double_value
         self.max_approach_dist = self.node.get_parameter('max_approach_dist').get_parameter_value().double_value
         self.step_approach_dist = self.node.get_parameter('step_approach_dist').get_parameter_value().double_value
+        self.centering_forward_speed = self.node.get_parameter('centering_forward_speed').get_parameter_value().double_value
         
         # Approaching
         self.final_approach_offset = self.node.get_parameter('final_approach_offset').get_parameter_value().double_value

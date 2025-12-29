@@ -19,12 +19,17 @@ class WaypointConfig:
     Configuration for a single waypoint.
     
     Attributes:
-        marker_id: ArUco marker ID to navigate to
+        marker_id: ArUco marker ID to navigate to, or None for action-only waypoints
+                   that skip navigation and execute the action immediately
         post_action: Optional Tello SDK command to execute after reaching waypoint
                      (e.g., "ccw 90", "cw 45", None)
     """
-    marker_id: int
+    marker_id: Optional[int]
     post_action: Optional[str] = None
+    
+    def is_action_only(self) -> bool:
+        """Check if this is an action-only waypoint (no marker navigation)."""
+        return self.marker_id is None
 
 
 class WaypointManager:
@@ -58,6 +63,7 @@ class WaypointManager:
         # Current state
         self.current_index = 0
         self.marker_pose: Optional[Pose] = None
+        # Timeout timer starts when drone begins searching, not when waypoint is created
         self.marker_last_seen_time: Optional[Time] = None
         
         if self.waypoints:
@@ -93,14 +99,14 @@ class WaypointManager:
                     value = value.strip()
                     
                     if key == 'id':
-                        marker_id = int(value)
+                        # Support 'none' for action-only waypoints
+                        if value.lower() in ['none', 'null', '']:
+                            marker_id = None
+                        else:
+                            marker_id = int(value)
                     elif key == 'action':
                         # Treat "none", "null", empty string as None
                         post_action = value if value.lower() not in ['none', 'null', ''] else None
-                
-                if marker_id is None:
-                    self.logger.error(f"Waypoint missing 'id' field: {wp_str}")
-                    continue
                 
                 waypoints.append(WaypointConfig(
                     marker_id=marker_id,
@@ -128,10 +134,22 @@ class WaypointManager:
         Get the marker ID of the current waypoint.
         
         Returns:
-            Current waypoint marker ID or -1 if no waypoint active
+            Current waypoint marker ID, or -1 if no waypoint active or action-only waypoint
         """
         waypoint = self.get_current_waypoint()
-        return waypoint.marker_id if waypoint else -1
+        if waypoint is None or waypoint.marker_id is None:
+            return -1
+        return waypoint.marker_id
+    
+    def is_current_waypoint_action_only(self) -> bool:
+        """
+        Check if current waypoint is action-only (no marker navigation needed).
+        
+        Returns:
+            True if current waypoint has no marker_id, False otherwise
+        """
+        waypoint = self.get_current_waypoint()
+        return waypoint is not None and waypoint.is_action_only()
     
     def update_marker_pose(self, msg: ArucoDetection):
         """
@@ -177,6 +195,14 @@ class WaypointManager:
         """
         return self.marker_pose is not None
     
+    def start_search_timer(self):
+        """
+        Start or restart the search timeout timer.
+        
+        Should be called when the drone begins actively searching for the waypoint
+        """
+        self.marker_last_seen_time = self.node.get_clock().now()
+    
     def check_marker_timeout(self, timeout_duration: float) -> bool:
         """
         Check if the current waypoint marker has timed out.
@@ -185,16 +211,17 @@ class WaypointManager:
             timeout_duration: Timeout threshold in seconds
             
         Returns:
-            True if marker has been lost longer than timeout, False otherwise
+            True if time since search started exceeds timeout, False otherwise
+            (or False if search hasn't started yet)
         """
         if self.marker_last_seen_time is None:
-            return False
+            return False  # Search hasn't started yet, no timeout
         
-        time_since_last_seen = (
+        elapsed_time = (
             self.node.get_clock().now() - self.marker_last_seen_time
         ).nanoseconds / 1e9
         
-        return time_since_last_seen > timeout_duration
+        return elapsed_time > timeout_duration
     
     def advance_to_next(self) -> bool:
         """
@@ -206,6 +233,7 @@ class WaypointManager:
         self.current_index += 1
         
         # Clear marker state for new waypoint
+        # Timer will be started when search actually begins (start_search_timer())
         self.marker_pose = None
         self.marker_last_seen_time = None
         

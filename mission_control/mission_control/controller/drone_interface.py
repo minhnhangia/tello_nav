@@ -190,17 +190,23 @@ class DroneInterface:
         self,
         command: str,
         next_state: MissionState,
-        fallback_state: MissionState
+        fallback_state: MissionState,
+        timeout: float = None,
+        max_retries: int = None
     ):
         """
-        Execute a drone action command.
+        Execute a drone action command with optional timeout and retry configuration.
         
         Args:
-            command: Tello SDK command string
+            command: Tello SDK command string (e.g., 'takeoff', 'forward 20')
             next_state: State to transition to on success
             fallback_state: State to transition to on failure
+            timeout: Command timeout in seconds (default: 10.0)
+            max_retries: Maximum retry attempts on failure (default: 0, no retries)
         """
-        self.action_manager.execute_action(command, next_state, fallback_state)
+        self.action_manager.execute_action(
+            command, next_state, fallback_state, timeout, max_retries
+        )
     
     def is_busy(self) -> bool:
         """Check if an action is currently executing."""
