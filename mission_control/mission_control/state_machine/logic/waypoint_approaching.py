@@ -19,6 +19,14 @@ class WaypointApproachingState(BaseState):
             )
             return MissionState.SEARCHING
         
+        # Defensive check: action-only waypoints should not reach this state
+        if self.waypoint_manager.is_current_waypoint_action_only():  # type: ignore
+            self.node.get_logger().warning(
+                "WAYPOINT_APPROACHING: Action-only waypoint detected. "
+                "Transitioning to WAYPOINT_ACTION."
+            )
+            return MissionState.WAYPOINT_ACTION
+        
         # Check for marker timeout
         if self.waypoint_manager.check_marker_timeout(self.params.waypoint_timeout):  # type: ignore
             self.node.get_logger().error(
@@ -62,7 +70,7 @@ class WaypointApproachingState(BaseState):
         self.drone.execute_action(
             f'forward {forward_dist_cmd}',
             MissionState.WAYPOINT_ACTION,
-            MissionState.WAYPOINT_ACTION,
+            MissionState.SEARCHING,
             max_retries=2
         )
     

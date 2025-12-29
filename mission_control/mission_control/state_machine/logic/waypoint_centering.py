@@ -21,6 +21,14 @@ class WaypointCenteringState(BaseState):
             )
             return MissionState.SEARCHING
         
+        # Check for action-only waypoint (skip navigation, go straight to action)
+        if self.waypoint_manager.is_current_waypoint_action_only():  # type: ignore
+            self.node.get_logger().info(
+                "WAYPOINT_CENTERING: Action-only waypoint detected. "
+                "Skipping navigation, transitioning to WAYPOINT_ACTION."
+            )
+            return MissionState.WAYPOINT_ACTION
+        
         # Start search timer on first entry (after STANDBY delay)
         # This ensures timeout only counts time spent actively searching
         if self.waypoint_manager.marker_last_seen_time is None:  # type: ignore
