@@ -119,7 +119,7 @@ stateDiagram-v2
     end note
 ```
 
-## State Transition Table (IEEE Format)
+## State Transition Table
 
 | Current State | Event/Condition | Next State | Action |
 |---------------|-----------------|------------|--------|
@@ -177,4 +177,3 @@ stateDiagram-v2
 - **RESETTING (S15)**: Resets all state; returns to IDLE
 
 ---
-*Generated for IEEE documentation standards*
