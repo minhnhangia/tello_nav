@@ -77,8 +77,8 @@ class ActionManager:
         command: str, 
         next_state_on_success: 'MissionState', 
         fallback_state_on_fail: 'MissionState',
-        timeout: float = None,
-        max_retries: int = None
+        timeout: Optional[float] = None,
+        max_retries: Optional[int] = None
     ):
         """
         Execute a Tello action command with optional timeout and retry configuration.

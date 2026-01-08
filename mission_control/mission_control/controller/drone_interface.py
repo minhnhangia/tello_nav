@@ -191,8 +191,8 @@ class DroneInterface:
         command: str,
         next_state: MissionState,
         fallback_state: MissionState,
-        timeout: float = None,
-        max_retries: int = None
+        timeout: Optional[float] = None,
+        max_retries: Optional[int] = None
     ):
         """
         Execute a drone action command with optional timeout and retry configuration.
