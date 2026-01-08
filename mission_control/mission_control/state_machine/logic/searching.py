@@ -57,8 +57,8 @@ class SearchingState(BaseState):
             "SEARCHING: Near exit. Turning 90-degree clockwise."
         )
         self.context.is_near_exit = False
-        self.drone.execute_action(
-            'cw 90',
+        self.drone.yaw_right_by_angle(
+            90,
             MissionState.SEARCHING,
             MissionState.SEARCHING
         )
@@ -77,10 +77,10 @@ class SearchingState(BaseState):
 
     def _avoid_corner(self):
         self.node.get_logger().warning(
-            "SEARCHING: Corner detected. Turning 150-degree clockwise."
+            "SEARCHING: Corner detected. Turning 137-degree clockwise."
         )
-        self.drone.execute_action(
-            'cw 150',
+        self.drone.yaw_right_by_angle(
+            137,
             MissionState.SEARCHING,
             MissionState.SEARCHING
         )
@@ -89,8 +89,8 @@ class SearchingState(BaseState):
         self.node.get_logger().warning(
             "SEARCHING: Head-on obstacle detected. Turning 180-degree clockwise."
         )
-        self.drone.execute_action(
-            'cw 180',
+        self.drone.yaw_right_by_angle(
+            180,
             MissionState.SEARCHING,
             MissionState.SEARCHING
         )
