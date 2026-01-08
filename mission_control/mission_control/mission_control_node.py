@@ -282,10 +282,11 @@ class MissionControl(Node):
         """
         self._publish_mission_state()
         
-        # Check for action timeouts
+        # Check for action timeouts and yaw rotation progress
         self.drone.check_timeout()
+        self.drone.check_yaw_progress()
         
-        # Wait until current action completes
+        # Wait until current action or yaw rotation completes
         if self.drone.is_busy():
             return
         

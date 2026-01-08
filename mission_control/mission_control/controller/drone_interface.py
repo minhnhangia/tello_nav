@@ -10,6 +10,7 @@ from tello_msgs.msg import FlightData
 from tello_msgs.srv import TelloAction
 
 from .action_manager import ActionManager
+from .yaw_controller import YawController
 from ..state_machine import MissionState
 
 
@@ -50,6 +51,15 @@ class DroneInterface:
             on_action_success,
             on_action_fail,
             self._invalidate_sensor_data
+        )
+        
+        # Yaw controller for precise angle-based rotation
+        self.yaw_controller = YawController(
+            node,
+            self.cmd_vel_pub,
+            self.get_heading,
+            on_action_success,
+            on_action_fail
         )
 
     def _init_sensor_vars(self):
@@ -209,12 +219,70 @@ class DroneInterface:
         )
     
     def is_busy(self) -> bool:
-        """Check if an action is currently executing."""
-        return self.action_manager.is_busy()
+        """Check if an action or yaw rotation is currently executing."""
+        return self.action_manager.is_busy() or self.yaw_controller.is_busy()
     
     def check_timeout(self):
         """Check and handle action timeouts."""
         self.action_manager.check_timeout()
+    
+    def check_yaw_progress(self):
+        """Check and handle yaw rotation progress."""
+        self.yaw_controller.check_progress()
+    
+    def yaw_right_by_angle(
+        self,
+        angle: float,
+        next_state: MissionState,
+        fallback_state: MissionState,
+        speed: Optional[float] = None,
+        timeout: Optional[float] = None,
+        tolerance: Optional[float] = None
+    ):
+        """
+        Rotate clockwise (right) by specified angle using velocity commands.
+        
+        This is more reliable than the Tello SDK 'cw' command as it uses
+        continuous velocity feedback with heading monitoring.
+        
+        Args:
+            angle: Degrees to rotate (positive value)
+            next_state: State to transition to on success
+            fallback_state: State to transition to on failure
+            speed: Yaw rate in rad/s (default: 0.5)
+            timeout: Timeout in seconds (default: 15.0)
+            tolerance: Completion tolerance in degrees (default: 5.0)
+        """
+        self.yaw_controller.yaw_right_by_angle(
+            angle, next_state, fallback_state, speed, timeout, tolerance
+        )
+    
+    def yaw_left_by_angle(
+        self,
+        angle: float,
+        next_state: MissionState,
+        fallback_state: MissionState,
+        speed: Optional[float] = None,
+        timeout: Optional[float] = None,
+        tolerance: Optional[float] = None
+    ):
+        """
+        Rotate counter-clockwise (left) by specified angle using velocity commands.
+        
+        This is more reliable than the Tello SDK 'ccw' command as it uses
+        continuous velocity feedback with heading monitoring.
+        
+        Args:
+            angle: Degrees to rotate (positive value)
+            next_state: State to transition to on success
+            fallback_state: State to transition to on failure
+            speed: Yaw rate in rad/s (default: 0.5)
+            timeout: Timeout in seconds (default: 15.0)
+            tolerance: Completion tolerance in degrees (default: 5.0)
+        """
+        self.yaw_controller.yaw_left_by_angle(
+            angle, next_state, fallback_state, speed, timeout, tolerance
+        )
     
     # ========================================================================
     # SENSOR QUERY INTERFACE

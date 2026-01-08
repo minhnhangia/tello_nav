@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-from typing import Optional
+import re
+from typing import Optional, Tuple
 
 from ..states import MissionState
 from ..base_state import BaseState
@@ -8,6 +9,9 @@ from ...aruco import WaypointConfig
 
 class WaypointActionState(BaseState):
     """Handles post-waypoint action execution and sequence advancement."""
+    
+    # Regex pattern for rotation commands: "cw 90", "ccw 45", etc.
+    ROTATION_PATTERN = re.compile(r'^(cw|ccw)\s+(\d+(?:\.\d+)?)$', re.IGNORECASE)
     
     def execute(self) -> Optional[MissionState]:
         """Execute WAYPOINT_ACTION state logic."""
@@ -68,6 +72,25 @@ class WaypointActionState(BaseState):
     # ----------------------------------------------------------------------
     # Post-Action Path
     # ----------------------------------------------------------------------
+    
+    def _parse_rotation_command(self, action: str) -> Optional[Tuple[str, float]]:
+        """
+        Parse a rotation command string.
+        
+        Args:
+            action: Command string (e.g., "cw 90", "ccw 45")
+            
+        Returns:
+            Tuple of (direction, angle) if rotation command, None otherwise
+            direction: 'cw' or 'ccw'
+            angle: rotation angle in degrees
+        """
+        match = self.ROTATION_PATTERN.match(action.strip())
+        if match:
+            direction = match.group(1).lower()
+            angle = float(match.group(2))
+            return (direction, angle)
+        return None
 
     def _handle_post_action(self, waypoint: WaypointConfig) -> Optional[MissionState]:
         """Executes waypoint actions and may advance waypoint before execution."""
@@ -88,12 +111,52 @@ class WaypointActionState(BaseState):
                 f"WAYPOINT_ACTION: Advanced to next waypoint {next_marker}"
             )
 
-        # Trigger async drone command execution
-        # NOTE: Caller resumes when drone reports action completion.
-        self.drone.execute_action(action, next_state, MissionState.SEARCHING, max_retries=2)
+        # Check if this is a rotation command
+        rotation = self._parse_rotation_command(action)
+        if rotation:
+            direction, angle = rotation
+            self._execute_rotation(direction, angle, next_state)
+        else:
+            # Non-rotation command: use standard execute_action
+            self.drone.execute_action(
+                action, next_state, MissionState.SEARCHING, max_retries=2
+            )
 
         # Return None to indicate async processing
         return None
+    
+    def _execute_rotation(
+        self, 
+        direction: str, 
+        angle: float, 
+        next_state: MissionState
+    ):
+        """
+        Execute a rotation using the YawController for reliable angle-based rotation.
+        
+        Args:
+            direction: 'cw' for clockwise (right), 'ccw' for counter-clockwise (left)
+            angle: Rotation angle in degrees
+            next_state: State to transition to on success
+        """
+        if direction == 'cw':
+            self.node.get_logger().info(
+                f"WAYPOINT_ACTION: Rotating CW (right) by {angle}° using YawController"
+            )
+            self.drone.yaw_right_by_angle(
+                angle=angle,
+                next_state=next_state,
+                fallback_state=MissionState.SEARCHING
+            )
+        else:  # ccw
+            self.node.get_logger().info(
+                f"WAYPOINT_ACTION: Rotating CCW (left) by {angle}° using YawController"
+            )
+            self.drone.yaw_left_by_angle(
+                angle=angle,
+                next_state=next_state,
+                fallback_state=MissionState.SEARCHING
+            )
 
     # ----------------------------------------------------------------------
     # No-Action Path
