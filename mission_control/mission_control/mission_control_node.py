@@ -249,6 +249,8 @@ class MissionControl(Node):
     
     def _on_action_fail(self, fallback_state: MissionState = MissionState.SEARCHING):
         """Callback for action failure or timeout."""
+        if fallback_state is None:
+            fallback_state = MissionState.SEARCHING
         self.get_logger().error(f"Action failed! Fallback to {fallback_state.name}.")
         self.mission_state = fallback_state
     
