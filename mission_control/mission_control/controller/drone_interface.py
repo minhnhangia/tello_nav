@@ -230,6 +230,10 @@ class DroneInterface:
         """Check and handle yaw rotation progress."""
         self.yaw_controller.check_progress()
     
+    def cancel_yaw(self):
+        """Cancel any ongoing yaw rotation without triggering callbacks."""
+        self.yaw_controller.cancel()
+    
     def yaw_right_by_angle(
         self,
         angle: float,

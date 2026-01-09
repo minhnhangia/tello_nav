@@ -164,6 +164,8 @@ class MissionControl(Node):
         # Scenario 1: Searching and found a marker
         if self.mission_state == MissionState.SEARCHING and len(msg.markers) > 0:
             if self.marker_handler.process_aruco_detection_for_search(msg):
+                # Cancel any ongoing yaw rotation to keep marker in view
+                self.drone.cancel_yaw()
                 self.mission_state = MissionState.LOCKING_ON
                 return
             
