@@ -44,6 +44,7 @@ class YawController:
         get_heading_callback: Callable[[], int],
         on_success_callback: Callable,
         on_fail_callback: Callable,
+        on_execute_callback: Callable
     ):
         """
         Initialize the YawController.
@@ -63,6 +64,7 @@ class YawController:
         # State transition callbacks
         self.on_success_callback = on_success_callback
         self.on_fail_callback = on_fail_callback
+        self.on_execute_callback = on_execute_callback
         
         # Controller state
         self.state = YawState.IDLE
@@ -245,6 +247,8 @@ class YawController:
         """Complete the rotation and trigger appropriate callback."""
         # Stop rotation
         self.cmd_vel_pub.publish(Twist())
+
+        self.on_execute_callback()
         
         if success:
             final_heading = float(self.get_heading())
@@ -264,6 +268,7 @@ class YawController:
         if self.is_busy():
             self.logger.info("Yaw rotation cancelled")
             self.cmd_vel_pub.publish(Twist())  # Stop rotation
+            self.on_execute_callback()
             self.reset()
     
     def reset(self):

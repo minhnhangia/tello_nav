@@ -59,7 +59,8 @@ class DroneInterface:
             self.cmd_vel_pub,
             self.get_heading,
             on_action_success,
-            on_action_fail
+            on_action_fail,
+            self._invalidate_sensor_data
         )
 
     def _init_sensor_vars(self):
