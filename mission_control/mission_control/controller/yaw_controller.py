@@ -181,7 +181,7 @@ class YawController:
         self.rotation_start_time = self.node.get_clock().now()
         
         direction_str = "CW (right)" if direction > 0 else "CCW (left)"
-        self.logger.info(
+        self.logger.debug(
             f"Starting {direction_str} rotation: {angle:.1f}° "
             f"(current: {current_heading:.1f}°, target: {self.target_heading:.1f}°)"
         )
@@ -252,7 +252,7 @@ class YawController:
         
         if success:
             final_heading = float(self.get_heading())
-            self.logger.info(
+            self.logger.debug(
                 f"Yaw rotation complete (final heading: {final_heading:.1f}°)"
             )
             next_state = self.pending_next_state
@@ -266,7 +266,7 @@ class YawController:
     def cancel(self):
         """Cancel any ongoing rotation without triggering callbacks."""
         if self.is_busy():
-            self.logger.info("Yaw rotation cancelled")
+            self.logger.warn("Yaw rotation cancelled")
             self.cmd_vel_pub.publish(Twist())  # Stop rotation
             self.on_execute_callback()
             self.reset()

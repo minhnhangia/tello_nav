@@ -68,9 +68,6 @@ class MissionControl(Node):
                 node=self,
                 waypoint_sequence=self.params.waypoint_sequence
             )
-            self.get_logger().info(
-                f"Waypoint navigation enabled with {self.waypoint_manager.get_waypoint_count()} waypoints"
-            )
         else:
             self.waypoint_manager = None
             self.get_logger().info("Waypoint navigation disabled")
