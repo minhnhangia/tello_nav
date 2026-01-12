@@ -60,7 +60,8 @@ class SearchingState(BaseState):
         self.drone.yaw_right_by_angle(
             90,
             MissionState.SEARCHING,
-            MissionState.SEARCHING
+            MissionState.SEARCHING,
+            speed=self.params.yaw_speed
         )
 
     def _avoid_obstacle(self, is_left_clearer: bool):
@@ -82,7 +83,8 @@ class SearchingState(BaseState):
         self.drone.yaw_right_by_angle(
             137,
             MissionState.SEARCHING,
-            MissionState.SEARCHING
+            MissionState.SEARCHING,
+            speed=self.params.yaw_speed
         )
 
     def _avoid_headon(self):
@@ -92,6 +94,7 @@ class SearchingState(BaseState):
         self.drone.yaw_right_by_angle(
             180,
             MissionState.SEARCHING,
-            MissionState.SEARCHING
+            MissionState.SEARCHING,
+            speed=self.params.yaw_speed
         )
 
