@@ -488,3 +488,7 @@ class ArucoMarkerHandler:
     def is_marker_visible(self) -> bool:
         """Check if the locked marker is currently visible."""
         return self.locked_on_marker_pose is not None
+    
+    def is_locked_on_priority_marker(self) -> bool:
+        """Check if currently locked marker is a priority marker."""
+        return self.locked_on_marker_id in self.priority_markers

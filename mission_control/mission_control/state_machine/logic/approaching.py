@@ -24,7 +24,13 @@ class ApproachingState(BaseState):
             self._hover_on_temporary_marker_lost()
             return None
         
-        self._move_to_marker()
+        # Determine next state: scan for priority markers if not on one
+        if self.marker_handler.is_locked_on_priority_marker():
+            next_state = MissionState.CAMERA_SWITCHING
+        else:
+            next_state = MissionState.PRIORITY_SCANNING
+
+        self._move_to_marker(next_state)
 
         return None
     
@@ -35,7 +41,7 @@ class ApproachingState(BaseState):
         )
         self.drone.hover()
 
-    def _move_to_marker(self):
+    def _move_to_marker(self, next_state: MissionState):
         """Move forward to directly above marker."""
         marker_pose: Pose = self.marker_handler.get_locked_marker_pose()    # type: ignore
         if marker_pose is None:
@@ -53,7 +59,7 @@ class ApproachingState(BaseState):
         forward_dist_cmd = self._compute_fwd_dist_cmd(forward_dist)
         self.drone.execute_action(
             f'forward {forward_dist_cmd}',
-            MissionState.CAMERA_SWITCHING,
+            next_state,
             MissionState.SEARCHING,
             max_retries=2
         )

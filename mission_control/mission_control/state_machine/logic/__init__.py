@@ -19,6 +19,7 @@ from .precision_landing import PrecisionLandingState
 from .landing import LandingState
 from .completing_mission import CompletingMissionState
 from .resetting import ResettingState
+from .priority_scanning import PriorityScanningState
 
 __all__ = [
     "TakingOffState",
@@ -35,4 +36,5 @@ __all__ = [
     "LandingState",
     "CompletingMissionState",
     "ResettingState",
+    "PriorityScanningState",
 ]

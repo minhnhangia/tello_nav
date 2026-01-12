@@ -21,3 +21,4 @@ class MissionState(Enum):
     LANDING = 13
     COMPLETING_MISSION = 14
     RESETTING = 15
+    PRIORITY_SCANNING = 16
