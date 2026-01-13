@@ -22,9 +22,11 @@ class MissionContext:
     
     # Precision landing state variables
     is_blind_landing: bool = False
+    precision_landing_initialized: bool = False
     
     def reset(self):
         """Reset all runtime variables to their initial state."""
         self.standby_start_time = None        
         self.is_near_exit = False
         self.is_blind_landing = False
+        self.precision_landing_initialized = False
