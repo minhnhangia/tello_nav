@@ -70,7 +70,9 @@ class YawController:
         self.state = YawState.IDLE
         
         # Rotation parameters (set per rotation)
-        self.target_heading: Optional[float] = None
+        self.target_rotation_deg: float = 0.0  # Total degrees to rotate
+        self.accumulated_rotation: float = 0.0  # Degrees rotated so far
+        self.last_heading: Optional[float] = None  # For tracking incremental rotation
         self.rotation_direction: int = 0  # +1 for CW (right), -1 for CCW (left)
         self.pending_next_state: Optional['MissionState'] = None
         self.pending_fallback_state: Optional['MissionState'] = None
@@ -170,11 +172,11 @@ class YawController:
         self.current_timeout = timeout if timeout is not None else self.DEFAULT_TIMEOUT_SEC
         self.current_tolerance = tolerance if tolerance is not None else self.DEFAULT_TOLERANCE_DEG
         
-        # Compute target heading
+        # Track rotation by accumulating degrees rotated (fixes 360° bug)
         current_heading = float(self.get_heading())
-        # CW (right) increases heading, CCW (left) decreases heading
-        delta = angle * direction
-        self.target_heading = self._normalize_angle(current_heading + delta)
+        self.target_rotation_deg = abs(angle)
+        self.accumulated_rotation = 0.0
+        self.last_heading = current_heading
         
         # Start rotation
         self.state = YawState.ROTATING
@@ -183,7 +185,7 @@ class YawController:
         direction_str = "CW (right)" if direction > 0 else "CCW (left)"
         self.logger.debug(
             f"Starting {direction_str} rotation: {angle:.1f}° "
-            f"(current: {current_heading:.1f}°, target: {self.target_heading:.1f}°)"
+            f"(current heading: {current_heading:.1f}°)"
         )
         
         # Send initial yaw command
@@ -193,42 +195,54 @@ class YawController:
         """
         Check rotation progress. Call this from the main control loop.
         
-        This method:
-        1. Checks if rotation is complete (within tolerance)
-        2. Checks for timeout
-        3. Adjusts yaw speed based on remaining angle (slowdown near target)
-        4. Continues sending yaw commands if still rotating
+        Accumulates rotation, checks for completion/timeout, and continues
+        sending yaw commands with adaptive speed if still rotating.
         """
         if self.state != YawState.ROTATING:
             return
         
-        if self.target_heading is None:
-            self.logger.error("check_progress called but target_heading is None")
+        if self.last_heading is None:
+            self.logger.error("check_progress called but last_heading is None")
             self._complete_rotation(success=False)
             return
         
-        current_heading = float(self.get_heading())
-        remaining = self._angular_distance(current_heading, self.target_heading)
-        remaining_abs = abs(remaining)
+        self._update_accumulated_rotation()
+        remaining = self.target_rotation_deg - self.accumulated_rotation
         
-        # Check completion
-        if remaining_abs <= self.current_tolerance:
+        if remaining <= self.current_tolerance:
             self._complete_rotation(success=True)
-            return
+        elif self._is_timed_out():
+            self._complete_rotation(success=False)
+        else:
+            self._send_yaw_command(remaining)
+    
+    def _update_accumulated_rotation(self):
+        """Update accumulated rotation based on heading change since last check."""
+        current_heading = float(self.get_heading())
+        delta = self._angular_distance(self.last_heading, current_heading)
         
-        # Check timeout
-        if self.rotation_start_time is not None:
-            elapsed = (self.node.get_clock().now() - self.rotation_start_time).nanoseconds / 1e9
-            if elapsed > self.current_timeout:
-                self.logger.error(
-                    f"Yaw rotation timed out after {elapsed:.1f}s "
-                    f"(remaining: {remaining_abs:.1f}°)"
-                )
-                self._complete_rotation(success=False)
-                return
+        # Only accumulate rotation in the intended direction
+        if self.rotation_direction > 0 and delta > 0:  # CW progress
+            self.accumulated_rotation += delta
+        elif self.rotation_direction < 0 and delta < 0:  # CCW progress
+            self.accumulated_rotation += abs(delta)
         
-        # Continue rotation with adaptive speed
-        self._send_yaw_command(remaining_abs)
+        self.last_heading = current_heading
+    
+    def _is_timed_out(self) -> bool:
+        """Check if rotation has exceeded timeout, logging error if so."""
+        if self.rotation_start_time is None:
+            return False
+        
+        elapsed = (self.node.get_clock().now() - self.rotation_start_time).nanoseconds / 1e9
+        if elapsed > self.current_timeout:
+            self.logger.error(
+                f"Yaw rotation timed out after {elapsed:.1f}s "
+                f"(accumulated: {self.accumulated_rotation:.1f}°, "
+                f"target: {self.target_rotation_deg:.1f}°)"
+            )
+            return True
+        return False
     
     def _send_yaw_command(self, remaining_angle: Optional[float] = None):
         """Send yaw velocity command with optional adaptive slowdown."""
@@ -253,7 +267,9 @@ class YawController:
         if success:
             final_heading = float(self.get_heading())
             self.logger.debug(
-                f"Yaw rotation complete (final heading: {final_heading:.1f}°)"
+                f"Yaw rotation complete "
+                f"(rotated: {self.accumulated_rotation:.1f}°, "
+                f"final heading: {final_heading:.1f}°)"
             )
             next_state = self.pending_next_state
             self.reset()
@@ -274,7 +290,9 @@ class YawController:
     def reset(self):
         """Reset controller to idle state."""
         self.state = YawState.IDLE
-        self.target_heading = None
+        self.target_rotation_deg = 0.0
+        self.accumulated_rotation = 0.0
+        self.last_heading = None
         self.rotation_direction = 0
         self.pending_next_state = None
         self.pending_fallback_state = None
