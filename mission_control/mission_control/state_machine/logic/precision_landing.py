@@ -12,6 +12,15 @@ class PrecisionLandingState(BaseState):
     
     def execute(self) -> Optional[MissionState]:
         """Execute PRECISION_LANDING state logic with recovery maneuvers."""
+        # One-time initialization: reset marker timeout after camera switch
+        # This handles the case where marker wasn't visible during PRIORITY_SCANNING
+        if not self.context.precision_landing_initialized:
+            self.marker_handler.reset_marker_timeout()
+            self.context.precision_landing_initialized = True
+            self.node.get_logger().debug(
+                "PRECISION_LANDING: Initialized - marker timeout reset after camera switch."
+            )
+        
         # Check for full timeout - land blind
         if self.marker_handler.check_marker_timeout(self.params.precision_landing_timeout):
             self._handle_permanent_marker_lost()

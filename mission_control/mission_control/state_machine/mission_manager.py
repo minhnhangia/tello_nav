@@ -78,6 +78,7 @@ class MissionManager:
             MissionState.LANDING: LandingState(*common_args),
             MissionState.COMPLETING_MISSION: CompletingMissionState(*common_args),
             MissionState.RESETTING: ResettingState(*common_args),
+            MissionState.PRIORITY_SCANNING: PriorityScanningState(*common_args),
         }
     
     def execute_state(self, state: MissionState) -> Optional[MissionState]:

@@ -341,6 +341,14 @@ class ArucoMarkerHandler:
 
         return time_since_last_marker > duration
 
+    def reset_marker_timeout(self):
+        """Reset marker last seen time to now.
+        
+        Call this after camera switch to give a fresh timeout window
+        for precision landing marker acquisition.
+        """
+        self.marker_last_seen_time = self.node.get_clock().now()
+
     def request_marker_lock(self, marker_id: int, handle_response: bool = True):
         """
         Request to reserve a marker from the swarm coordinator.
@@ -488,3 +496,7 @@ class ArucoMarkerHandler:
     def is_marker_visible(self) -> bool:
         """Check if the locked marker is currently visible."""
         return self.locked_on_marker_pose is not None
+    
+    def is_locked_on_priority_marker(self) -> bool:
+        """Check if currently locked marker is a priority marker."""
+        return self.locked_on_marker_id in self.priority_markers

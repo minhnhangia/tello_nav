@@ -68,9 +68,6 @@ class MissionControl(Node):
                 node=self,
                 waypoint_sequence=self.params.waypoint_sequence
             )
-            self.get_logger().info(
-                f"Waypoint navigation enabled with {self.waypoint_manager.get_waypoint_count()} waypoints"
-            )
         else:
             self.waypoint_manager = None
             self.get_logger().info("Waypoint navigation disabled")
@@ -183,6 +180,17 @@ class MissionControl(Node):
                     self.mission_state = MissionState.LOCKING_ON
                     return
         
+        # Scenario 2.5: Priority scanning - detect priority markers during 360° scan
+        if self.mission_state == MissionState.PRIORITY_SCANNING and len(msg.markers) > 0:
+            if self.marker_handler.should_switch_to_priority_marker(msg):
+                if self.marker_handler.process_aruco_detection_for_search(msg):
+                    self.drone.cancel_yaw()  # Cancel ongoing rotation
+                    self.get_logger().info(
+                        "PRIORITY_SCANNING: Priority marker detected! Switching target."
+                    )
+                    self.mission_state = MissionState.LOCKING_ON
+                    return
+        
         # Scenario 3: Update locked marker pose
         if self.mission_state in [
             MissionState.CENTERING,
@@ -232,6 +240,7 @@ class MissionControl(Node):
             MissionState.CENTERING,
             MissionState.APPROACHING,
             MissionState.CAMERA_SWITCHING,
+            MissionState.PRIORITY_SCANNING,
             MissionState.PRECISION_LANDING,
             MissionState.LANDING
         ]:
