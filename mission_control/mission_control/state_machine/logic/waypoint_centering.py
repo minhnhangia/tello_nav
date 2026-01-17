@@ -77,7 +77,8 @@ class WaypointCenteringState(BaseState):
         
         # Centered but far - move closer
         if is_centered and not is_close_enough:
-            self._move_closer_to_marker(forward_dist)
+            # self._move_closer_to_marker(forward_dist)
+            self.drone.move_forward(self.params.forward_speed * 2)
             return None
     
     def _wait_for_sensor_data(self):
