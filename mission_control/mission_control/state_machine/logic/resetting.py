@@ -19,6 +19,7 @@ class ResettingState(BaseState):
         self.drone.execute_action(
             'downvision 0',
             MissionState.IDLE,
-            MissionState.IDLE
+            MissionState.IDLE,
+            max_retries=2
         )
         return None
