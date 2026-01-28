@@ -39,8 +39,8 @@ class PriorityScanningState(BaseState):
                 angle=360,
                 next_state=MissionState.CAMERA_SWITCHING,  # No priority found after full scan
                 fallback_state=MissionState.CAMERA_SWITCHING,  # Timeout - proceed with landing
-                speed=self.params.yaw_speed,
-                timeout=20.0  # Allow sufficient time for full rotation
+                speed=self.params.scanning_yaw_speed,
+                timeout=22.0  # Allow sufficient time for full rotation
             )
         
         return None  # Wait for yaw completion or ArUco interrupt

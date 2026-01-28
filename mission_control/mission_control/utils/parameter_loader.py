@@ -52,6 +52,9 @@ class ParameterLoader:
         
         # APPROACHING state parameters
         self.node.declare_parameter('final_approach_offset', 0.35)
+
+        # PRIORITY_SCANNING parameters
+        self.node.declare_parameter('scanning_yaw_speed', 0.4)
         
         # PRECISION_LANDING parameters
         self.node.declare_parameter('precision_landing_threshold_x', 0.12)
@@ -107,6 +110,9 @@ class ParameterLoader:
         
         # Approaching
         self.final_approach_offset = self.node.get_parameter('final_approach_offset').get_parameter_value().double_value
+
+        # Priority Scanning
+        self.scanning_yaw_speed = self.node.get_parameter('scanning_yaw_speed').get_parameter_value().double_value
         
         # Precision Landing
         self.precision_landing_threshold_x = self.node.get_parameter('precision_landing_threshold_x').get_parameter_value().double_value
