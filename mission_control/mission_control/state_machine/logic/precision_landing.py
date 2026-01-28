@@ -45,8 +45,16 @@ class PrecisionLandingState(BaseState):
         # Check if centered on both axes
         x_centered = abs(x_error) <= self.params.precision_landing_threshold_x
         y_centered = abs(y_error) <= self.params.precision_landing_threshold_y
+        is_centered = x_centered and y_centered
+
+        # Check if low enough to land
+        is_low_enough = self.drone.latest_height <= self.params.landing_height_threshold
         
-        if x_centered and y_centered:
+        if is_centered and not is_low_enough:
+            self._move_down_to_landing_height()
+            return None
+
+        if is_centered and is_low_enough:
             self._handle_successful_centering()
             return MissionState.LANDING
         
@@ -69,6 +77,14 @@ class PrecisionLandingState(BaseState):
             throttle_duration_sec=2.0
         )
         self.drone.move_up(self.params.ascending_speed)
+
+    def _move_down_to_landing_height(self):
+        self.node.get_logger().info(
+            f"PRECISION_LANDING: Centered over marker but at {self.drone.latest_height:.2f}m. "
+            "Descending to landing height.",
+            throttle_duration_sec=2.0
+        )
+        self.drone.move_down(self.params.descending_speed)
 
     def _hover_on_temporary_marker_lost(self):
         self.node.get_logger().debug(

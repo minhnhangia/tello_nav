@@ -57,10 +57,12 @@ class ParameterLoader:
         self.node.declare_parameter('precision_landing_threshold_x', 0.12)
         self.node.declare_parameter('precision_landing_threshold_y', 0.12)
         self.node.declare_parameter('precision_landing_max_speed', 0.2)
-        self.node.declare_parameter('precision_sideway_kp', 0.65)
-        self.node.declare_parameter('precision_forward_kp', 0.65)
+        self.node.declare_parameter('precision_sideway_kp', 0.78)
+        self.node.declare_parameter('precision_forward_kp', 0.78)
         self.node.declare_parameter('precision_landing_timeout_s', 14.0)
-        self.node.declare_parameter('recovery_height', 1.4)
+        self.node.declare_parameter('recovery_height', 1.5)
+        self.node.declare_parameter('landing_height_threshold', 0.90)
+        self.node.declare_parameter('descending_speed', 0.15)
     
     def _load_all_parameters(self):
         """Load all parameters into instance variables."""
@@ -114,3 +116,5 @@ class ParameterLoader:
         self.precision_forward_kp = self.node.get_parameter('precision_forward_kp').get_parameter_value().double_value
         self.precision_landing_timeout = self.node.get_parameter('precision_landing_timeout_s').get_parameter_value().double_value
         self.recovery_height = self.node.get_parameter('recovery_height').get_parameter_value().double_value
+        self.landing_height_threshold = self.node.get_parameter('landing_height_threshold').get_parameter_value().double_value
+        self.descending_speed = self.node.get_parameter('descending_speed').get_parameter_value().double_value
