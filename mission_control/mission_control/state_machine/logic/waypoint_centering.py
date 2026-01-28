@@ -77,7 +77,6 @@ class WaypointCenteringState(BaseState):
         
         # Centered but far - move closer
         if is_centered and not is_close_enough:
-            # self._move_closer_to_marker(forward_dist)
             self.drone.move_forward(self.params.forward_speed * 2)
             return None
     
@@ -166,21 +165,6 @@ class WaypointCenteringState(BaseState):
             "Transitioning to WAYPOINT_APPROACHING."
         )
         self.drone.hover()
-    
-    def _move_closer_to_marker(self, forward_dist: float):
-        """Move closer to the marker by a fixed step distance."""
-        step_distance = max(self.params.waypoint_step_approach_dist,
-                            forward_dist - self.params.waypoint_max_approach_dist)
-        
-        self.node.get_logger().info(
-            f"WAYPOINT_CENTERING: Centered but far from waypoint {self.waypoint_manager.get_current_marker_id()} "  # type: ignore
-            f"({forward_dist:.2f}m). Moving closer by {step_distance:.2f}m."
-        )
-        self.drone.execute_action(
-            f'forward {int(step_distance * 100)}',
-            MissionState.WAYPOINT_CENTERING,
-            MissionState.WAYPOINT_CENTERING
-        )
     
     def _compute_speed(self, error: float, kp: float, max_speed: float) -> float:
         """Compute velocity command using proportional control."""

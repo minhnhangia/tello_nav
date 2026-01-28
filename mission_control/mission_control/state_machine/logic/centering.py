@@ -52,7 +52,7 @@ class CenteringState(BaseState):
         
         # Centered but far - move closer
         if (is_centered and not is_close_enough):
-            self._move_closer_to_marker(forward_dist)
+            self.drone.move_forward(self.params.forward_speed * 2)
             return None
         
     def _wait_for_sensor_data(self):
@@ -154,21 +154,6 @@ class CenteringState(BaseState):
             "CENTERING: Centered on marker. Transitioning to APPROACHING."
         )
         self.drone.hover()
-
-    def _move_closer_to_marker(self, forward_dist: float):
-        """Move closer to the marker by a fixed step distance."""
-        # step_distance = min(self.params.step_approach_dist, 
-        #                     forward_dist - self.params.max_approach_dist + 10)
-        step_distance = self.params.step_approach_dist
-        self.node.get_logger().info(
-            f"CENTERING: Centered but far from marker ({forward_dist:.2f}m). "
-            f"Moving closer by {step_distance:.2f}m."
-        )
-        self.drone.execute_action(
-            f'forward {step_distance * 100}',
-            MissionState.CENTERING,
-            MissionState.CENTERING
-        )
 
     def _compute_speed(self, error: float, kp: float, max_speed: float) -> float:
         """Compute velocity command using proportional control."""
