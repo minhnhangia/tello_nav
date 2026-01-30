@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Drone interface for high-level control and telemetry access."""
+import math
 from typing import Optional, Callable
+
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Twist, PointStamped, Pose2D
 from tello_msgs.msg import FlightData
 from tello_msgs.srv import TelloAction
 
@@ -66,6 +68,9 @@ class DroneInterface:
         self.latest_height: float = 0.0
         self.latest_heading: int = 0
         self.latest_battery: int = 100
+        
+        # Fused pose: x, y from UWB (50Hz), theta from flight_data heading (10Hz)
+        self._latest_pose: Pose2D = Pose2D()
 
     def _setup_pubs_subs(self):
         # QoS profile for sensor topics (BEST_EFFORT for real-time telemetry)
@@ -84,6 +89,14 @@ class DroneInterface:
             FlightData,
             'flight_data',
             self._flight_data_callback,
+            qos_profile
+        )
+
+        # Subscribers for UWB position
+        self._uwb_pos_sub = self.node.create_subscription(
+            PointStamped,
+            'uwb/position',
+            self._uwb_pos_callback,
             qos_profile
         )
 
@@ -117,6 +130,12 @@ class DroneInterface:
                 f"Battery at {self.latest_battery}%",
                 throttle_duration_sec=20.0
             )
+
+    def _uwb_pos_callback(self, msg: PointStamped):
+        """Update fused pose with UWB position and latest heading."""
+        self._latest_pose.x = msg.point.x
+        self._latest_pose.y = msg.point.y
+        self._latest_pose.theta = math.radians(self.latest_heading)
     
     # ========================================================================
     # COMMAND INTERFACE
@@ -274,6 +293,10 @@ class DroneInterface:
     def get_heading(self) -> int:
         """Get current heading (yaw) in degrees."""
         return self.latest_heading
+    
+    def get_pose(self) -> Pose2D:
+        """Get current 2D pose (x, y in meters, theta in radians)."""
+        return self._latest_pose
     
     def get_battery_percent(self) -> int:
         """Get current battery percentage (0-100)."""
