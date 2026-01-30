@@ -43,8 +43,8 @@ class ParameterLoader:
         
         # CENTERING state parameters
         self.node.declare_parameter('centering_threshold_x', 0.12)
-        self.node.declare_parameter('centering_yaw_kp', 0.4)
-        self.node.declare_parameter('centering_yaw_speed', 0.6)
+        self.node.declare_parameter('centering_yaw_kp', 0.38)
+        self.node.declare_parameter('centering_yaw_speed', 0.58)
         self.node.declare_parameter('marker_timeout_s', 2.5)
         self.node.declare_parameter('max_approach_dist', 3.5)
         self.node.declare_parameter('step_approach_dist', 0.6)
