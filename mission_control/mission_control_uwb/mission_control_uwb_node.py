@@ -19,7 +19,8 @@ from std_srvs.srv import Trigger
 from .state_machine import MissionState, MissionManager
 from .controller import DroneInterface
 from .utils import ParameterLoader
-from .aruco import ArucoMarkerHandler, ExitMarkerHandler, WaypointManager
+from .aruco import ArucoMarkerHandler, ExitMarkerHandler
+from .uwb import WaypointManager, UWBNavigator
 
 
 class MissionControlUWB(Node):
@@ -30,24 +31,57 @@ class MissionControlUWB(Node):
     def __init__(self):
         super().__init__('mission_control_uwb')
         
-        # Load parameters
         self.params = ParameterLoader(self)
         
-        # Initialize drone interface
+        self._init_drone_interface()
+        self._init_services()
+        self._init_subscriptions()
+        self._init_marker_handlers()
+        self._init_waypoint_navigation()
+        self._init_mission_manager()
+        self._init_state_publisher()
+        self._init_timers()
+        
+        self.get_logger().info(
+            f"Mission Control Node started! Current state: {self.mission_state.name}"
+        )
+    
+    # ========================================================================
+    # INITIALIZATION HELPERS
+    # ========================================================================
+    
+    def _init_drone_interface(self):
+        """Initialize drone interface for control and telemetry."""
         self.drone = DroneInterface(
             self,
             self._on_action_success,
             self._on_action_fail
         )
-        
-        # Initialize takeoff and landing service servers
-        self._setup_takeoff_server()
-        self._setup_landing_server()
-        
-        # Initialize ArUco subscriber
-        self._setup_aruco_sub()
-        
-        # Initialize ArUco marker handler
+    
+    def _init_services(self):
+        """Initialize ROS2 service servers."""
+        self.takeoff_srv = self.create_service(
+            Trigger, 'takeoff', self._handle_takeoff_request
+        )
+        self.landing_srv = self.create_service(
+            Trigger, 'land', self._handle_landing_request
+        )
+    
+    def _init_subscriptions(self):
+        """Initialize ROS2 subscriptions."""
+        qos_best_effort = QoSProfile(
+            reliability=QoSReliabilityPolicy.BEST_EFFORT,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1
+        )
+        self.aruco_sub = self.create_subscription(
+            ArucoDetection, 'aruco_detections',
+            self._aruco_callback, qos_best_effort
+        )
+    
+    def _init_marker_handlers(self):
+        """Initialize ArUco marker and exit marker handlers."""
         self.marker_handler = ArucoMarkerHandler(
             node=self,
             drone_id=self.params.drone_id,
@@ -55,34 +89,49 @@ class MissionControlUWB(Node):
             on_marker_locked_callback=self._on_marker_locked,
             on_marker_lost_callback=self._on_marker_lost
         )
-
-        # Initialize Exit Marker Handler
         self.exit_marker_handler = ExitMarkerHandler(
             priority_markers=set(self.params.priority_markers),
             exit_markers=set(self.params.exit_markers),
         )
-        
-        # Initialize waypoint manager
-        if self.params.enable_waypoint_navigation:
-            self.waypoint_manager = WaypointManager(
-                node=self,
-                waypoint_sequence=self.params.waypoint_sequence
-            )
-        else:
+    
+    def _init_waypoint_navigation(self):
+        """Initialize waypoint manager and UWB navigator if enabled."""
+        if not self.params.enable_waypoint_navigation:
             self.waypoint_manager = None
+            self.uwb_navigator = None
             self.get_logger().info("Waypoint navigation disabled")
+            return
         
-        # Initialize mission manager with all dependencies
+        self.waypoint_manager = WaypointManager(
+            node=self,
+            waypoint_sequence=self.params.waypoint_sequence
+        )
+        self.uwb_navigator = UWBNavigator(
+            drone_interface=self.drone,
+            node=self,
+            tolerance_xy=self.params.waypoint_tolerance_xy,
+            tolerance_yaw=self.params.waypoint_tolerance_yaw,
+            forward_speed=self.params.waypoint_forward_speed,
+            yaw_speed=self.params.yaw_speed
+        )
+        self.get_logger().info("UWB Navigator initialized")
+    
+    def _init_mission_manager(self):
+        """Initialize mission manager with all dependencies."""
         self.mission_manager = MissionManager(
             self,
             self.drone,
             self.marker_handler,
             self.waypoint_manager,
+            self.uwb_navigator,
             self.params
         )
-        
-        # Current mission state
+    
+    def _init_state_publisher(self):
+        """Initialize mission state tracking and publisher."""
         self.mission_state = MissionState.IDLE
+        self._last_published_state = None
+        
         state_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.RELIABLE,
             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
@@ -90,48 +139,11 @@ class MissionControlUWB(Node):
             depth=1
         )
         self.state_pub = self.create_publisher(UInt8, 'mission_state', state_qos)
-        self._last_published_state = None
-        
-        # Start main control loops
+    
+    def _init_timers(self):
+        """Initialize control loop timers."""
         self.main_timer = self.create_timer(0.25, self._main_logic_loop)  # 4 Hz
         self.reservation_timer = self.create_timer(2.0, self._renew_marker_reservation)
-        
-        self.get_logger().info(
-            f"Mission Control Node started! Current state: {self.mission_state.name}"
-        )
-    
-    def _setup_takeoff_server(self):
-        """Initialize takeoff service server."""
-        self.takeoff_srv = self.create_service(
-            Trigger,
-            'takeoff',
-            self._handle_takeoff_request
-        )
-
-    def _setup_landing_server(self):
-        """Initialize landing service server."""
-        self.landing_srv = self.create_service(
-            Trigger,
-            'land',
-            self._handle_landing_request
-        )
-        
-    def _setup_aruco_sub(self):
-        """Initialize ArUco subscriber."""
-        qos_profile = QoSProfile(
-            reliability=QoSReliabilityPolicy.BEST_EFFORT,
-            durability=QoSDurabilityPolicy.VOLATILE,
-            history=QoSHistoryPolicy.KEEP_LAST,
-            depth=1
-        )
-        
-        # ArUco subscriber (complex state-dependent logic)
-        self.aruco_sub = self.create_subscription(
-            ArucoDetection,
-            'aruco_detections',
-            self._aruco_callback,
-            qos_profile
-        )
         
     def _publish_mission_state(self):
         """Publish mission state transitions for monitoring dashboards."""
@@ -149,15 +161,6 @@ class MissionControlUWB(Node):
     
     def _aruco_callback(self, msg: ArucoDetection):
         """Process ArUco detections and coordinate with marker handler."""
-        # Scenario 0: Update waypoint marker pose during waypoint navigation
-        if self.mission_state in [
-            MissionState.WAYPOINT_CENTERING,
-            MissionState.WAYPOINT_APPROACHING
-        ]:
-            if self.waypoint_manager:
-                self.waypoint_manager.update_marker_pose(msg)
-            return
-        
         # Scenario 1: Searching and found a marker
         if self.mission_state == MissionState.SEARCHING and len(msg.markers) > 0:
             if self.marker_handler.process_aruco_detection_for_search(msg):

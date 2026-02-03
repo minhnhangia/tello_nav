@@ -7,7 +7,8 @@ from rclpy.node import Node
 from .states import MissionState
 from .mission_context import MissionContext
 from ..controller import DroneInterface
-from ..aruco import ArucoMarkerHandler, WaypointManager
+from ..aruco import ArucoMarkerHandler
+from ..uwb import WaypointManager
 from ..utils import ParameterLoader
 
 

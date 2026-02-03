@@ -56,7 +56,7 @@ class StandbyState(BaseState):
                 f"({self.waypoint_manager.get_waypoint_count()} waypoints). "
                 "Transitioning to WAYPOINT_CENTERING."
             )
-            return MissionState.WAYPOINT_CENTERING
+            return MissionState.WAYPOINT_NAVIGATION
         else:
             self.node.get_logger().warning(
                 "STANDBY: Delay complete. Waypoint navigation enabled but "

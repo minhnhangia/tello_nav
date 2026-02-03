@@ -8,7 +8,8 @@ from .base_state import BaseState
 from .mission_context import MissionContext
 from .logic import *
 from ..controller import DroneInterface
-from ..aruco import ArucoMarkerHandler, WaypointManager
+from ..aruco import ArucoMarkerHandler
+from ..uwb import WaypointManager, UWBNavigator
 from ..utils import ParameterLoader
 
 StateRegistry = Dict[MissionState, BaseState]
@@ -30,6 +31,7 @@ class MissionManager:
         drone: DroneInterface,
         marker_handler: ArucoMarkerHandler,
         waypoint_manager: Optional[WaypointManager],
+        uwb_navigator: Optional[UWBNavigator],
         params: ParameterLoader
     ):
         """
@@ -40,12 +42,14 @@ class MissionManager:
             drone: Drone interface for control and telemetry
             marker_handler: ArUco marker coordination handler
             waypoint_manager: Waypoint navigation manager (None if disabled)
+            uwb_navigator: UWB-based navigator for waypoint navigation (None if disabled)
             params: Parameter loader with configuration
         """
         self.node = node
         self.drone = drone
         self.marker_handler = marker_handler
         self.waypoint_manager = waypoint_manager
+        self.uwb_navigator = uwb_navigator
         self.params = params
         
         # Shared mission context
@@ -67,9 +71,7 @@ class MissionManager:
             MissionState.TAKING_OFF: TakingOffState(*common_args),
             MissionState.ASCENDING: AscendingState(*common_args),
             MissionState.STANDBY: StandbyState(*common_args),
-            MissionState.WAYPOINT_CENTERING: WaypointCenteringState(*common_args),
-            MissionState.WAYPOINT_APPROACHING: WaypointApproachingState(*common_args),
-            MissionState.WAYPOINT_ACTION: WaypointActionState(*common_args),
+            MissionState.WAYPOINT_NAVIGATION: WaypointNavigationState(*common_args, self.uwb_navigator),
             MissionState.SEARCHING: SearchingState(*common_args),
             MissionState.CENTERING: CenteringState(*common_args),
             MissionState.APPROACHING: ApproachingState(*common_args),

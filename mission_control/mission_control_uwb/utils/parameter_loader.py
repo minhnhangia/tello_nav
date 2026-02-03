@@ -34,6 +34,11 @@ class ParameterLoader:
         self.node.declare_parameter('waypoint_max_approach_dist', 4.0)
         self.node.declare_parameter('waypoint_step_approach_dist', 1.0)
         
+        # UWB Navigator parameters (for waypoint navigation)
+        self.node.declare_parameter('waypoint_tolerance_xy', 0.20)
+        self.node.declare_parameter('waypoint_tolerance_yaw', 5.0)
+        self.node.declare_parameter('waypoint_forward_speed', 0.3)
+        
         # SEARCHING state parameters
         self.node.declare_parameter('yaw_speed', 0.5)
         self.node.declare_parameter('forward_speed', 0.2)
@@ -43,7 +48,7 @@ class ParameterLoader:
         
         # CENTERING state parameters
         self.node.declare_parameter('centering_threshold_x', 0.12)
-        self.node.declare_parameter('centering_yaw_kp', 0.4)
+        self.node.declare_parameter('centering_yaw_kp', 0.38)
         self.node.declare_parameter('centering_yaw_speed', 0.58)
         self.node.declare_parameter('marker_timeout_s', 2.5)
         self.node.declare_parameter('max_approach_dist', 3.5)
@@ -91,6 +96,11 @@ class ParameterLoader:
         # Waypoint sequence - raw string array, parsed by WaypointManager
         waypoint_param = self.node.get_parameter('waypoint_sequence')
         self.waypoint_sequence = [s for s in waypoint_param.get_parameter_value().string_array_value if s]
+        
+        # UWB Navigator parameters
+        self.waypoint_tolerance_xy = self.node.get_parameter('waypoint_tolerance_xy').get_parameter_value().double_value
+        self.waypoint_tolerance_yaw = self.node.get_parameter('waypoint_tolerance_yaw').get_parameter_value().double_value
+        self.waypoint_forward_speed = self.node.get_parameter('waypoint_forward_speed').get_parameter_value().double_value
         
         # Searching
         self.yaw_speed = self.node.get_parameter('yaw_speed').get_parameter_value().double_value
