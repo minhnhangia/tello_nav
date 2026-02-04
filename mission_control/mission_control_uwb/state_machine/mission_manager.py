@@ -65,13 +65,13 @@ class MissionManager:
         Returns:
             Dictionary mapping MissionState enum to state instance
         """
-        common_args = (self.node, self.drone, self.marker_handler, self.waypoint_manager, self.params, self.context)
+        common_args = (self.node, self.drone, self.marker_handler, self.waypoint_manager, self.uwb_navigator, self.params, self.context)
         
         return {
             MissionState.TAKING_OFF: TakingOffState(*common_args),
             MissionState.ASCENDING: AscendingState(*common_args),
             MissionState.STANDBY: StandbyState(*common_args),
-            MissionState.WAYPOINT_NAVIGATION: WaypointNavigationState(*common_args, self.uwb_navigator),
+            MissionState.WAYPOINT_NAVIGATION: WaypointNavigationState(*common_args),
             MissionState.SEARCHING: SearchingState(*common_args),
             MissionState.CENTERING: CenteringState(*common_args),
             MissionState.APPROACHING: ApproachingState(*common_args),

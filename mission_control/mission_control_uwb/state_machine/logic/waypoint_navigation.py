@@ -6,17 +6,11 @@ Uses UWB positioning to navigate the drone to predefined waypoints.
 This state handles the actual movement; waypoint sequencing is managed
 by the WaypointManager.
 """
-from typing import Optional, TYPE_CHECKING
-
-from rclpy.node import Node
+from typing import Optional
 
 from ..states import MissionState
 from ..base_state import BaseState
-from ..mission_context import MissionContext
-from ...controller import DroneInterface
-from ...aruco import ArucoMarkerHandler
-from ...uwb import WaypointManager, UWBNavigator, NavStatus
-from ...utils import ParameterLoader
+from ...uwb import NavStatus
 
 
 class WaypointNavigationState(BaseState):
@@ -26,37 +20,8 @@ class WaypointNavigationState(BaseState):
     This state:
     1. Retrieves target position from context (set by a higher-level planner)
     2. Uses UWBNavigator's non-blocking update() to move toward target
-    3. Transitions to next state on success or handles failures
-    
-    The UWBNavigator instance is passed from MissionManager (initialized in node).
+    3. Transitions to next state on success or handles failures    
     """
-    
-    __slots__ = ('uwb_navigator',)
-    
-    def __init__(
-        self,
-        node: Node,
-        drone: DroneInterface,
-        marker_handler: ArucoMarkerHandler,
-        waypoint_manager: Optional[WaypointManager],
-        params: ParameterLoader,
-        context: MissionContext,
-        uwb_navigator: Optional[UWBNavigator]
-    ):
-        """
-        Initialize waypoint navigation state.
-        
-        Args:
-            node: ROS2 node for logging
-            drone: Drone interface for control and telemetry
-            marker_handler: ArUco marker coordination handler
-            waypoint_manager: Waypoint navigation manager
-            params: Parameter loader with configuration
-            context: Shared mission context for runtime state
-            uwb_navigator: UWB-based navigator instance (None if disabled)
-        """
-        super().__init__(node, drone, marker_handler, waypoint_manager, params, context)
-        self.uwb_navigator = uwb_navigator
     
     def execute(self) -> Optional[MissionState]:
         """
@@ -123,8 +88,8 @@ class WaypointNavigationState(BaseState):
         # )
         
         self.uwb_navigator.set_goal(
-            x=3.0,
-            y=3.0,
+            x=4.6,
+            y=5.3,
             strategy="DRIVE"
         )
         return True
