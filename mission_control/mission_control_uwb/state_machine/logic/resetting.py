@@ -16,6 +16,9 @@ class ResettingState(BaseState):
         self.context.reset()
         
         self.marker_handler.reset_marker_state()
+
+        self.waypoint_manager.reset()
+
         self.drone.execute_action(
             'downvision 0',
             MissionState.IDLE,

@@ -50,11 +50,11 @@ class StandbyState(BaseState):
             )
             return MissionState.SEARCHING
         
-        if self.waypoint_manager and self.waypoint_manager.get_waypoint_count() > 0:
+        if self.waypoint_manager and self.waypoint_manager.has_waypoints():
             self.node.get_logger().info(
                 f"STANDBY: Delay complete. Starting waypoint navigation "
-                f"({self.waypoint_manager.get_waypoint_count()} waypoints). "
-                "Transitioning to WAYPOINT_CENTERING."
+                f"({self.waypoint_manager.total_count} waypoints). "
+                "Transitioning to WAYPOINT_NAVIGATION."
             )
             return MissionState.WAYPOINT_NAVIGATION
         else:

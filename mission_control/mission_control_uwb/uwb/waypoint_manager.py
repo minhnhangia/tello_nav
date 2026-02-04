@@ -2,295 +2,261 @@
 """
 Waypoint Manager Module
 
-Manages sequential waypoint navigation for autonomous missions.
+Manages sequential UWB coordinate-based waypoint navigation for autonomous missions.
+Waypoints are loaded from a JSON file for clean separation of concerns.
 """
 
+import json
 from dataclasses import dataclass
-from typing import Optional, List
+from pathlib import Path
+from typing import Optional, List, Tuple
+
 from rclpy.node import Node
-from rclpy.time import Time
-from geometry_msgs.msg import Pose
-from aruco_opencv_msgs.msg import ArucoDetection
 
 
-@dataclass
-class WaypointConfig:
+@dataclass(frozen=True, slots=True)
+class Waypoint:
     """
-    Configuration for a single waypoint.
+    Immutable configuration for a single waypoint.
     
     Attributes:
-        marker_id: ArUco marker ID to navigate to, or None for action-only waypoints
-                   that skip navigation and execute the action immediately
-        post_action: Optional Tello SDK command to execute after reaching waypoint
-                     (e.g., "ccw 90", "cw 45", None)
+        x: X coordinate in meters (world frame)
+        y: Y coordinate in meters (world frame)
+        label: Optional human-readable label for logging
     """
-    marker_id: Optional[int]
-    post_action: Optional[str] = None
+    x: float
+    y: float
+    label: Optional[str] = None
     
-    def is_action_only(self) -> bool:
-        """Check if this is an action-only waypoint (no marker navigation)."""
-        return self.marker_id is None
+    @property
+    def position(self) -> Tuple[float, float]:
+        """Return (x, y) tuple for convenience."""
+        return (self.x, self.y)
+    
+    def __str__(self) -> str:
+        if self.label:
+            return f"{self.label}({self.x:.2f}, {self.y:.2f})"
+        return f"({self.x:.2f}, {self.y:.2f})"
 
 
 class WaypointManager:
     """
-    Manages sequential waypoint navigation.
+    Manages sequential waypoint navigation using UWB coordinates.
+    
+    Waypoints are loaded from a JSON file with format:
+        {
+          "waypoints": [
+            {"x": 1.0, "y": 2.0, "label": "optional_name"},
+            {"x": 3.0, "y": 4.0}
+          ]
+        }
     
     Responsibilities:
-    - Store waypoint sequence from parameters
-    - Track current waypoint index
-    - Provide current target marker ID
-    - Store/update current waypoint marker pose from ArUco
-    - Track marker visibility and timeout
-    - Advance through waypoint sequence
+        - Load waypoints from JSON file
+        - Track current waypoint index
+        - Provide current target coordinates
+        - Advance through waypoint sequence (including skip on timeout)
     """
     
-    def __init__(self, node: Node, waypoint_sequence: List[str]):
-        """
-        Initialize waypoint manager.
-        
-        Args:
-            node: ROS2 node for logging and time
-            waypoint_sequence: List of waypoint strings from parameters
-                              Format: ["id:50,action:ccw 90", "id:51,action:none", ...]
-        """
-        self.node = node
-        self.logger = node.get_logger()
-        
-        # Parse waypoint sequence
-        self.waypoints: List[WaypointConfig] = self._parse_waypoint_sequence(waypoint_sequence)
-        
-        # Current state
-        self.current_index = 0
-        self.marker_pose: Optional[Pose] = None
-        # Timeout timer starts when drone begins searching, not when waypoint is created
-        self.marker_last_seen_time: Optional[Time] = None
-        
-        if self.waypoints:
-            self.logger.info(
-                f"WaypointManager initialized with {len(self.waypoints)} waypoints: "
-                f"{[w.marker_id for w in self.waypoints]}"
-            )
-        else:
-            self.logger.warning("WaypointManager initialized with empty waypoint sequence")
+    __slots__ = ('_node', '_waypoints', '_current_index')
     
-    def _parse_waypoint_sequence(self, waypoint_sequence: List[str]) -> List[WaypointConfig]:
+    def __init__(self, node: Node, waypoints_file: str):
         """
-        Parse waypoint configuration from string array.
+        Initialize waypoint manager from JSON file.
         
         Args:
-            waypoint_sequence: List of waypoint strings
-                             Format: ["id:50,action:ccw 90", "id:51,action:none", ...]
+            node: ROS2 node for logging
+            waypoints_file: Path to JSON waypoints file
+            
+        Raises:
+            FileNotFoundError: If waypoints file doesn't exist
+            ValueError: If JSON format is invalid
+        """
+        self._node = node
+        self._waypoints: Tuple[Waypoint, ...] = self._load_waypoints(waypoints_file)
+        self._current_index: int = 0
+        
+        self._log_initialization()
+    
+    def _load_waypoints(self, filepath: str) -> Tuple[Waypoint, ...]:
+        """
+        Load waypoints from JSON file.
+        
+        Args:
+            filepath: Path to JSON waypoints file
             
         Returns:
-            List of WaypointConfig objects
+            Tuple of Waypoint objects
+            
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            ValueError: If JSON format is invalid
         """
-        waypoints = []
-        for wp_str in waypoint_sequence:
-            try:
-                # Parse "id:50,action:ccw 90" format
-                marker_id = None
-                post_action = None
-                
-                parts = wp_str.split(',')
-                for part in parts:
-                    key, value = part.split(':', 1)
-                    key = key.strip()
-                    value = value.strip()
-                    
-                    if key == 'id':
-                        # Support 'none' for action-only waypoints
-                        if value.lower() in ['none', 'null', '']:
-                            marker_id = None
-                        else:
-                            marker_id = int(value)
-                    elif key == 'action':
-                        # Treat "none", "null", empty string as None
-                        post_action = value if value.lower() not in ['none', 'null', ''] else None
-                
-                waypoints.append(WaypointConfig(
-                    marker_id=marker_id,
-                    post_action=post_action
-                ))
-            except Exception as e:
-                self.logger.error(f"Failed to parse waypoint '{wp_str}': {e}")
-                continue
+        path = Path(filepath).expanduser().resolve()
+        logger = self._node.get_logger()
         
-        return waypoints
+        if not path.exists():
+            raise FileNotFoundError(f"Waypoints file not found: {path}")
+        
+        logger.info(f"WaypointManager: Loading waypoints from {path}")
+        
+        with open(path, 'r') as f:
+            data = json.load(f)
+        
+        # Validate structure
+        if 'waypoints' not in data:
+            raise ValueError(
+                f"Invalid waypoints file: missing 'waypoints' key. "
+                f"Expected format: {{'waypoints': [{{'x': 1.0, 'y': 2.0}}, ...]}}"
+            )
+        
+        waypoints_data = data['waypoints']
+        if not isinstance(waypoints_data, list):
+            raise ValueError("'waypoints' must be an array")
+        
+        # Parse waypoints
+        waypoints: List[Waypoint] = []
+        for i, wp in enumerate(waypoints_data):
+            if not isinstance(wp, dict):
+                raise ValueError(f"Waypoint {i} must be an object with 'x' and 'y' keys")
+            
+            if 'x' not in wp or 'y' not in wp:
+                raise ValueError(f"Waypoint {i} missing required 'x' or 'y' coordinate")
+            
+            waypoints.append(Waypoint(
+                x=float(wp['x']),
+                y=float(wp['y']),
+                label=wp.get('label')
+            ))
+        
+        return tuple(waypoints)
     
-    def get_current_waypoint(self) -> Optional[WaypointConfig]:
-        """
-        Get the current active waypoint configuration.
+    def _log_initialization(self) -> None:
+        """Log waypoint initialization summary."""
+        logger = self._node.get_logger()
         
-        Returns:
-            Current WaypointConfig or None if sequence complete
-        """
-        if 0 <= self.current_index < len(self.waypoints):
-            return self.waypoints[self.current_index]
-        return None
-    
-    def get_current_marker_id(self) -> int:
-        """
-        Get the marker ID of the current waypoint.
-        
-        Returns:
-            Current waypoint marker ID, or -1 if no waypoint active or action-only waypoint
-        """
-        waypoint = self.get_current_waypoint()
-        if waypoint is None or waypoint.marker_id is None:
-            return -1
-        return waypoint.marker_id
-    
-    def is_current_waypoint_action_only(self) -> bool:
-        """
-        Check if current waypoint is action-only (no marker navigation needed).
-        
-        Returns:
-            True if current waypoint has no marker_id, False otherwise
-        """
-        waypoint = self.get_current_waypoint()
-        return waypoint is not None and waypoint.is_action_only()
-    
-    def update_marker_pose(self, msg: ArucoDetection):
-        """
-        Update marker pose from ArUco detection message.
-        
-        Searches for the current waypoint marker in the detection and updates pose.
-        
-        Args:
-            msg: ArucoDetection message containing detected markers
-        """
-        current_marker_id = self.get_current_marker_id()
-        if current_marker_id < 0:
+        if not self._waypoints:
+            logger.warning("WaypointManager: No waypoints in file")
             return
         
-        # Search for current waypoint marker
-        marker_found = False
-        for marker in msg.markers:
-            if marker.marker_id == current_marker_id:
-                self.marker_pose = marker.pose
-                self.marker_last_seen_time = self.node.get_clock().now()
-                marker_found = True
-                break
-        
-        # Clear pose if marker not visible
-        if not marker_found:
-            self.marker_pose = None
+        waypoint_strs = [str(wp) for wp in self._waypoints]
+        logger.info(
+            f"WaypointManager: Loaded {len(self._waypoints)} waypoints: "
+            f"{', '.join(waypoint_strs)}"
+        )
     
-    def get_marker_pose(self) -> Optional[Pose]:
+    # ========================================================================
+    # WAYPOINT ACCESS
+    # ========================================================================
+    
+    def get_current_waypoint(self) -> Optional[Waypoint]:
         """
-        Get the latest pose of the current waypoint marker.
+        Get the current active waypoint.
         
         Returns:
-            Marker pose or None if not currently visible
+            Current Waypoint or None if sequence complete/empty
         """
-        return self.marker_pose
+        if 0 <= self._current_index < len(self._waypoints):
+            return self._waypoints[self._current_index]
+        return None
     
-    def is_marker_visible(self) -> bool:
+    def get_current_position(self) -> Optional[Tuple[float, float]]:
         """
-        Check if the current waypoint marker is currently visible.
+        Get (x, y) coordinates of current waypoint.
+        
+        Convenience method for direct coordinate access.
         
         Returns:
-            True if marker pose is available, False otherwise
+            (x, y) tuple in meters, or None if no active waypoint
         """
-        return self.marker_pose is not None
+        waypoint = self.get_current_waypoint()
+        return waypoint.position if waypoint else None
     
-    def start_search_timer(self):
-        """
-        Start or restart the search timeout timer.
-        
-        Should be called when the drone begins actively searching for the waypoint
-        """
-        self.marker_last_seen_time = self.node.get_clock().now()
+    # ========================================================================
+    # SEQUENCE CONTROL
+    # ========================================================================
     
-    def check_marker_timeout(self, timeout_duration: float) -> bool:
-        """
-        Check if the current waypoint marker has timed out.
-        
-        Args:
-            timeout_duration: Timeout threshold in seconds
-            
-        Returns:
-            True if time since search started exceeds timeout, False otherwise
-            (or False if search hasn't started yet)
-        """
-        if self.marker_last_seen_time is None:
-            return False  # Search hasn't started yet, no timeout
-        
-        elapsed_time = (
-            self.node.get_clock().now() - self.marker_last_seen_time
-        ).nanoseconds / 1e9
-        
-        return elapsed_time > timeout_duration
-    
-    def advance_to_next(self) -> bool:
+    def advance(self) -> bool:
         """
         Advance to the next waypoint in the sequence.
         
+        Call this when current waypoint is reached OR on timeout (skip).
+        
         Returns:
-            True if there are more waypoints, False if sequence complete
+            True if advanced to a new waypoint, False if sequence complete
         """
-        self.current_index += 1
+        if self._current_index >= len(self._waypoints):
+            return False
         
-        # Clear marker state for new waypoint
-        # Timer will be started when search actually begins (start_search_timer())
-        self.marker_pose = None
-        self.marker_last_seen_time = None
+        self._current_index += 1
         
-        if self.current_index < len(self.waypoints):
-            next_waypoint = self.waypoints[self.current_index]
-            self.logger.info(
-                f"Advanced to waypoint {self.current_index + 1}/{len(self.waypoints)}: "
-                f"Marker ID {next_waypoint.marker_id}"
+        if self._current_index < len(self._waypoints):
+            next_wp = self._waypoints[self._current_index]
+            self._node.get_logger().info(
+                f"WaypointManager: Advanced to waypoint "
+                f"{self.get_progress_string()}: {next_wp}"
             )
             return True
-        else:
-            self.logger.info("All waypoints completed!")
-            return False
+        
+        self._node.get_logger().info(
+            "WaypointManager: All waypoints completed!"
+        )
+        return False
     
-    def has_next_waypoint(self) -> bool:
+    def skip_current(self) -> bool:
         """
-        Check if there are more waypoints after the current one.
+        Skip the current waypoint (e.g., on timeout) and advance to next.
+        
+        Logs a warning before advancing.
         
         Returns:
-            True if more waypoints exist, False otherwise
+            True if skipped to a new waypoint, False if sequence complete
         """
-        return (self.current_index + 1) < len(self.waypoints)
+        current = self.get_current_waypoint()
+        if current:
+            self._node.get_logger().warning(
+                f"WaypointManager: Skipping waypoint "
+                f"{self.get_progress_string()}: {current}"
+            )
+        return self.advance()
     
-    def is_sequence_complete(self) -> bool:
+    def reset(self) -> None:
+        """Reset to the first waypoint."""
+        self._current_index = 0
+        self._node.get_logger().info("WaypointManager: Reset to first waypoint")
+    
+    # ========================================================================
+    # SEQUENCE INTROSPECTION
+    # ========================================================================
+    
+    def is_complete(self) -> bool:
+        """Check if all waypoints have been visited."""
+        return self._current_index >= len(self._waypoints)
+    
+    def has_waypoints(self) -> bool:
+        """Check if any waypoints are configured."""
+        return len(self._waypoints) > 0
+    
+    @property
+    def current_index(self) -> int:
+        """Current waypoint index (0-based)."""
+        return self._current_index
+    
+    @property
+    def total_count(self) -> int:
+        """Total number of waypoints in sequence."""
+        return len(self._waypoints)
+    
+    def get_progress_string(self) -> str:
         """
-        Check if all waypoints have been completed.
+        Get human-readable progress string.
         
         Returns:
-            True if all waypoints done, False otherwise
+            String like "2/5" (1-indexed for display)
         """
-        return self.current_index >= len(self.waypoints)
+        return f"{self._current_index + 1}/{len(self._waypoints)}"
     
-    def reset(self):
-        """
-        Reset waypoint manager to initial state.
-        
-        Resets to first waypoint and clears all marker tracking.
-        """
-        self.current_index = 0
-        self.marker_pose = None
-        self.marker_last_seen_time = None
-        self.logger.info("WaypointManager reset to initial state")
-    
-    def get_waypoint_count(self) -> int:
-        """
-        Get total number of waypoints in sequence.
-        
-        Returns:
-            Total waypoint count
-        """
-        return len(self.waypoints)
-    
-    def get_current_index(self) -> int:
-        """
-        Get current waypoint index (0-based).
-        
-        Returns:
-            Current index
-        """
-        return self.current_index
+    @property
+    def waypoints(self) -> Tuple[Waypoint, ...]:
+        """Read-only access to all waypoints."""
+        return self._waypoints

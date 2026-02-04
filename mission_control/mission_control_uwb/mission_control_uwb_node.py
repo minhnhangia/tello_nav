@@ -9,8 +9,11 @@ The heavy lifting is delegated to specialized modules:
 - ArucoMarkerHandler: Marker selection and swarm coordination
 - ParameterLoader: Configuration management
 """
+import os
+
 import rclpy
 from rclpy.node import Node
+from ament_index_python.packages import get_package_share_directory
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
 from aruco_opencv_msgs.msg import ArucoDetection
 from std_msgs.msg import UInt8
@@ -95,17 +98,28 @@ class MissionControlUWB(Node):
         )
     
     def _init_waypoint_navigation(self):
-        """Initialize waypoint manager and UWB navigator if enabled."""
-        if not self.params.enable_waypoint_navigation:
+        """Initialize waypoint manager and UWB navigator."""
+        if not self.params.waypoints_file:
+            self.get_logger().error(
+                "Waypoint navigation enabled but 'waypoints_file' not specified"
+            )
             self.waypoint_manager = None
             self.uwb_navigator = None
-            self.get_logger().info("Waypoint navigation disabled")
             return
         
-        self.waypoint_manager = WaypointManager(
-            node=self,
-            waypoint_sequence=self.params.waypoint_sequence
-        )
+        waypoints_path = self._resolve_waypoints_path(self.params.waypoints_file)
+        
+        try:
+            self.waypoint_manager = WaypointManager(
+                node=self,
+                waypoints_file=waypoints_path
+            )
+        except (FileNotFoundError, ValueError) as e:
+            self.get_logger().error(f"Failed to load waypoints: {e}")
+            self.waypoint_manager = None
+            self.uwb_navigator = None
+            return
+        
         self.uwb_navigator = UWBNavigator(
             drone_interface=self.drone,
             node=self,
@@ -115,6 +129,31 @@ class MissionControlUWB(Node):
             yaw_speed=self.params.yaw_speed
         )
         self.get_logger().info("UWB Navigator initialized")
+    
+    def _resolve_waypoints_path(self, waypoints_file: str) -> str:
+        """
+        Resolve waypoints file path.
+        
+        If the path is relative (no leading '/'), resolve it relative to
+        tello_bringup/missions directory. Absolute paths are returned as-is.
+        
+        Args:
+            waypoints_file: Filename or absolute path to waypoints JSON
+            
+        Returns:
+            Absolute path to waypoints file
+        """
+        if os.path.isabs(waypoints_file):
+            return waypoints_file
+        
+        # Resolve relative path to tello_bringup/missions/
+        missions_dir = os.path.join(
+            get_package_share_directory('tello_bringup'),
+            'missions'
+        )
+        resolved_path = os.path.join(missions_dir, waypoints_file)
+        self.get_logger().debug(f"Resolved waypoints path: {resolved_path}")
+        return resolved_path
     
     def _init_mission_manager(self):
         """Initialize mission manager with all dependencies."""

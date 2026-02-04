@@ -26,8 +26,8 @@ class BaseState(ABC):
         node: Node,
         drone: DroneInterface,
         marker_handler: ArucoMarkerHandler,
-        waypoint_manager: Optional[WaypointManager],
-        uwb_navigator: Optional[UWBNavigator],
+        waypoint_manager: WaypointManager,
+        uwb_navigator: UWBNavigator,
         params: ParameterLoader,
         context: MissionContext
     ):
@@ -38,7 +38,8 @@ class BaseState(ABC):
             node: ROS2 node for logging
             drone: Drone interface for control and telemetry
             marker_handler: ArUco marker coordination handler
-            waypoint_manager: Waypoint navigation manager (None if disabled)
+            waypoint_manager: Waypoint navigation manager
+            uwb_navigator: UWB-based navigator for waypoint navigation
             params: Parameter loader with configuration
             context: Shared mission context for runtime state
         """

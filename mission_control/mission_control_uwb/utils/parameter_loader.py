@@ -29,10 +29,8 @@ class ParameterLoader:
 
         # WAYPOINT navigation parameters
         self.node.declare_parameter('enable_waypoint_navigation', False)
-        self.node.declare_parameter('waypoint_timeout_s', 10.0)
-        self.node.declare_parameter('waypoint_sequence', [''])
-        self.node.declare_parameter('waypoint_max_approach_dist', 4.0)
-        self.node.declare_parameter('waypoint_step_approach_dist', 1.0)
+        self.node.declare_parameter('waypoint_timeout_s', 30.0)
+        self.node.declare_parameter('waypoints_file', '')
         
         # UWB Navigator parameters (for waypoint navigation)
         self.node.declare_parameter('waypoint_tolerance_xy', 0.30)
@@ -90,12 +88,7 @@ class ParameterLoader:
         # Waypoint Navigation
         self.enable_waypoint_navigation = self.node.get_parameter('enable_waypoint_navigation').get_parameter_value().bool_value
         self.waypoint_timeout = self.node.get_parameter('waypoint_timeout_s').get_parameter_value().double_value
-        self.waypoint_max_approach_dist = self.node.get_parameter('waypoint_max_approach_dist').get_parameter_value().double_value
-        self.waypoint_step_approach_dist = self.node.get_parameter('waypoint_step_approach_dist').get_parameter_value().double_value
-        
-        # Waypoint sequence - raw string array, parsed by WaypointManager
-        waypoint_param = self.node.get_parameter('waypoint_sequence')
-        self.waypoint_sequence = [s for s in waypoint_param.get_parameter_value().string_array_value if s]
+        self.waypoints_file = self.node.get_parameter('waypoints_file').get_parameter_value().string_value
         
         # UWB Navigator parameters
         self.waypoint_tolerance_xy = self.node.get_parameter('waypoint_tolerance_xy').get_parameter_value().double_value

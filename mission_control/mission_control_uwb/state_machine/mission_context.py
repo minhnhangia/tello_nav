@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mission context containing shared runtime state."""
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 from rclpy.time import Time
 
 
@@ -25,8 +25,7 @@ class MissionContext:
     precision_landing_initialized: bool = False
     
     # Waypoint navigation state variables
-    current_waypoint_target: Optional[Tuple[float, float]] = None  # (x, y) in meters
-    current_waypoint_index: int = 0
+    waypoint_nav_start_time: Optional[Time] = None  # For timeout tracking
     
     def reset(self):
         """Reset all runtime variables to their initial state."""
@@ -34,5 +33,4 @@ class MissionContext:
         self.is_near_exit = False
         self.is_blind_landing = False
         self.precision_landing_initialized = False
-        self.current_waypoint_target = None
-        self.current_waypoint_index = 0
+        self.waypoint_nav_start_time = None
