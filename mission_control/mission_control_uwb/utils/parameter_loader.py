@@ -35,9 +35,9 @@ class ParameterLoader:
         self.node.declare_parameter('waypoint_step_approach_dist', 1.0)
         
         # UWB Navigator parameters (for waypoint navigation)
-        self.node.declare_parameter('waypoint_tolerance_xy', 0.20)
-        self.node.declare_parameter('waypoint_tolerance_yaw', 5.0)
-        self.node.declare_parameter('waypoint_forward_speed', 0.3)
+        self.node.declare_parameter('waypoint_tolerance_xy', 0.30)
+        self.node.declare_parameter('waypoint_tolerance_yaw', 3.0)
+        self.node.declare_parameter('waypoint_forward_speed', 1.0)
         
         # SEARCHING state parameters
         self.node.declare_parameter('yaw_speed', 0.5)

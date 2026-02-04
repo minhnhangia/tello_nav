@@ -53,11 +53,11 @@ class UWBNavigator:
         self,
         drone_interface: 'DroneInterface',
         node: 'Node',
-        tolerance_xy: float = 0.20,
-        tolerance_yaw: float = 5.0,
-        forward_speed: float = 0.3,
-        strafe_speed: float = 0.2,
-        yaw_speed: float = 0.4
+        tolerance_xy: float = 0.30,
+        tolerance_yaw: float = 3.0,
+        forward_speed: float = 1.0,
+        strafe_speed: float = 1.0,
+        yaw_speed: float = 0.5
     ):
         """
         Initialize UWB navigator.
@@ -249,8 +249,8 @@ class UWBNavigator:
         self._phase = NavPhase.MOVING
         
         # Speed scaling: slow down when close
-        speed_scale = min(1.0, distance / 0.5)  # Ramp down within 0.5m
-        speed = self.forward_speed * max(0.3, speed_scale)  # Min 30% speed
+        speed_scale = min(1.0, distance / 2.0)  # Ramp down within 2m
+        speed = self.forward_speed * max(0.1, speed_scale)  # Min 10% speed
         
         self.drone.move_forward(speed)
 
@@ -311,12 +311,9 @@ class UWBNavigator:
         
         Returns True if position appears to be uninitialized or out of bounds.
         """
-        # Check for uninitialized (0,0) or NaN
         if np.any(np.isnan(pos)):
             return True
-        if np.allclose(pos, [0.0, 0.0], atol=1e-6):
-            # (0,0) might be valid in some setups - could make configurable
-            return False
+        
         return False
 
     def _log_progress(self, distance: float, pos: np.ndarray, yaw: float):
