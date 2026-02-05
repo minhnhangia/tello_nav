@@ -23,11 +23,10 @@ class CenteringState(BaseState):
             return None
         # Get sensor data
         depth: DepthMapAnalysis = self.drone.latest_depth_analysis # type: ignore
-        tof: float = self.drone.latest_tof # type: ignore
         
         # Check if marker is visible
         if not self.marker_handler.is_marker_visible():
-            self._handle_temporary_marker_lost(depth, tof)
+            self._handle_temporary_marker_lost(depth)
             return None
         marker_pose: Pose = self.marker_handler.get_locked_marker_pose() # type: ignore
         x_error = marker_pose.position.x
@@ -69,20 +68,13 @@ class CenteringState(BaseState):
         )
         self.marker_handler.unreserve_current_marker()
 
-    def _handle_temporary_marker_lost(self, depth: DepthMapAnalysis, tof: float):
+    def _handle_temporary_marker_lost(self, depth: DepthMapAnalysis):
         if not self.drone.has_sensor_data():
             return
         
         is_obstacle_detected = depth.middle_center.red > depth.middle_center.blue
 
-        is_corner_detected = (depth.middle_center.blue > depth.middle_center.red and 
-                              tof <= self.params.corner_tof_threshold)
-        
-        is_headon_detected = tof <= self.params.headon_tof_threshold
-
-        is_safe_to_move_forward = not (is_obstacle_detected or 
-                                       is_corner_detected or 
-                                       is_headon_detected)
+        is_safe_to_move_forward = not is_obstacle_detected
 
         # Check if already close enough based on last known position
         last_pose = self.marker_handler.get_last_known_marker_pose()

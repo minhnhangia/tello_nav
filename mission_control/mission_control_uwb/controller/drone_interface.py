@@ -6,6 +6,7 @@ from typing import Optional, Callable
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoSHistoryPolicy
 from geometry_msgs.msg import Twist, PointStamped, Pose2D
+from midas_msgs.msg import DepthMapAnalysis
 from tello_msgs.msg import FlightData
 from tello_msgs.srv import TelloAction
 
@@ -65,6 +66,7 @@ class DroneInterface:
 
     def _init_sensor_vars(self):
         # Sensor data
+        self.latest_depth_analysis: Optional[DepthMapAnalysis] = None
         self.latest_height: float = 0.0
         self.latest_heading: int = 0
         self.latest_battery: int = 100
@@ -85,6 +87,13 @@ class DroneInterface:
         self.cmd_vel_pub = self.node.create_publisher(Twist, 'cmd_vel', 1)
         
         # Subscribers for drone telemetry
+        self._depth_sub = self.node.create_subscription(
+            DepthMapAnalysis,
+            'depth/analysis',
+            self._depth_analysis_callback,
+            qos_profile
+        )
+        
         self._flight_data_sub = self.node.create_subscription(
             FlightData,
             'flight_data',
@@ -107,11 +116,16 @@ class DroneInterface:
             self.node.get_logger().info(f'Waiting for {self.action_service_name} service...')
 
     def _invalidate_sensor_data(self):
-        pass
+        """Clear critical sensor data before executing actions."""
+        self.latest_depth_analysis = None
     
     # ========================================================================
     # ROS2 SENSOR CALLBACKS
     # ========================================================================
+    
+    def _depth_analysis_callback(self, msg: DepthMapAnalysis):
+        """Internal callback for depth analysis updates."""
+        self.latest_depth_analysis = msg
     
     def _flight_data_callback(self, msg: FlightData):
         """Internal callback for flight data updates with battery monitoring."""
@@ -285,6 +299,10 @@ class DroneInterface:
     # ========================================================================
     # SENSOR QUERY INTERFACE
     # ========================================================================
+    
+    def has_sensor_data(self) -> bool:
+        """Check if critical sensor data is available."""
+        return self.latest_depth_analysis is not None
     
     def get_height(self) -> float:
         """Get current height above ground in meters."""
