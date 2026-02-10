@@ -23,7 +23,7 @@ from .state_machine import MissionState, MissionManager
 from .controller import DroneInterface
 from .utils import ParameterLoader
 from .aruco import ArucoMarkerHandler, ExitMarkerHandler
-from .uwb import WaypointManager, UWBNavigator
+from .uwb import WaypointManager, UWBNavigator, WaypointCoordinator
 
 
 class MissionControlUWB(Node):
@@ -105,6 +105,7 @@ class MissionControlUWB(Node):
             )
             self.waypoint_manager = None
             self.uwb_navigator = None
+            self.waypoint_coordinator = None
             return
         
         waypoints_path = self._resolve_waypoints_path(self.params.waypoints_file)
@@ -118,7 +119,14 @@ class MissionControlUWB(Node):
             self.get_logger().error(f"Failed to load waypoints: {e}")
             self.waypoint_manager = None
             self.uwb_navigator = None
+            self.waypoint_coordinator = None
             return
+        
+        # Initialize waypoint coordinator for swarm coordination
+        self.waypoint_coordinator = WaypointCoordinator(
+            node=self,
+            drone_id=self.params.drone_id
+        )
         
         self.uwb_navigator = UWBNavigator(
             drone_interface=self.drone,
@@ -128,7 +136,7 @@ class MissionControlUWB(Node):
             forward_speed=self.params.waypoint_forward_speed,
             yaw_speed=self.params.yaw_speed
         )
-        self.get_logger().info("UWB Navigator initialized")
+        self.get_logger().info("UWB Navigator and WaypointCoordinator initialized")
     
     def _resolve_waypoints_path(self, waypoints_file: str) -> str:
         """
@@ -163,6 +171,7 @@ class MissionControlUWB(Node):
             self.marker_handler,
             self.waypoint_manager,
             self.uwb_navigator,
+            self.waypoint_coordinator,
             self.params
         )
     
@@ -182,7 +191,7 @@ class MissionControlUWB(Node):
     def _init_timers(self):
         """Initialize control loop timers."""
         self.main_timer = self.create_timer(0.25, self._main_logic_loop)  # 4 Hz
-        self.reservation_timer = self.create_timer(2.0, self._renew_marker_reservation)
+        self.reservation_timer = self.create_timer(2.0, self._renew_reservations)
         
     def _publish_mission_state(self):
         """Publish mission state transitions for monitoring dashboards."""
@@ -276,8 +285,9 @@ class MissionControlUWB(Node):
         response.message = "Landing initiated."
         return response
     
-    def _renew_marker_reservation(self):
-        """Periodically renew marker reservation during approach/landing."""
+    def _renew_reservations(self):
+        """Periodically renew both marker and waypoint reservations (2 Hz)."""
+        # Renew marker reservation during approach/landing
         if self.mission_state in [
             MissionState.CENTERING,
             MissionState.APPROACHING,
@@ -287,6 +297,11 @@ class MissionControlUWB(Node):
             MissionState.LANDING
         ]:
             self.marker_handler.renew_marker_reservation()
+        
+        # Renew waypoint reservation during navigation
+        if self.mission_state == MissionState.WAYPOINT_NAVIGATION:
+            if self.waypoint_coordinator is not None:
+                self.waypoint_coordinator.renew_waypoint_reservation()
     
     # ========================================================================
     # ACTION MANAGER CALLBACKS

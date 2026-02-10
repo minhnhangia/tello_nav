@@ -8,7 +8,7 @@ from .states import MissionState
 from .mission_context import MissionContext
 from ..controller import DroneInterface
 from ..aruco import ArucoMarkerHandler
-from ..uwb import WaypointManager, UWBNavigator
+from ..uwb import WaypointManager, UWBNavigator, WaypointCoordinator
 from ..utils import ParameterLoader
 
 
@@ -19,7 +19,10 @@ class BaseState(ABC):
     Each concrete state implements the execute() method containing its specific logic.
     """
     
-    __slots__ = ('node', 'drone', 'marker_handler', 'waypoint_manager', 'uwb_navigator', 'params', 'context')
+    __slots__ = (
+        'node', 'drone', 'marker_handler', 'waypoint_manager', 
+        'uwb_navigator', 'waypoint_coordinator', 'params', 'context'
+    )
     
     def __init__(
         self,
@@ -28,6 +31,7 @@ class BaseState(ABC):
         marker_handler: ArucoMarkerHandler,
         waypoint_manager: WaypointManager,
         uwb_navigator: UWBNavigator,
+        waypoint_coordinator: WaypointCoordinator,
         params: ParameterLoader,
         context: MissionContext
     ):
@@ -40,6 +44,7 @@ class BaseState(ABC):
             marker_handler: ArUco marker coordination handler
             waypoint_manager: Waypoint navigation manager
             uwb_navigator: UWB-based navigator for waypoint navigation
+            waypoint_coordinator: Waypoint reservation coordinator
             params: Parameter loader with configuration
             context: Shared mission context for runtime state
         """
@@ -48,6 +53,7 @@ class BaseState(ABC):
         self.marker_handler = marker_handler
         self.waypoint_manager = waypoint_manager
         self.uwb_navigator = uwb_navigator
+        self.waypoint_coordinator = waypoint_coordinator
         self.params = params
         self.context = context
     

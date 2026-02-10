@@ -9,7 +9,7 @@ from .mission_context import MissionContext
 from .logic import *
 from ..controller import DroneInterface
 from ..aruco import ArucoMarkerHandler
-from ..uwb import WaypointManager, UWBNavigator
+from ..uwb import WaypointManager, UWBNavigator, WaypointCoordinator
 from ..utils import ParameterLoader
 
 StateRegistry = Dict[MissionState, BaseState]
@@ -30,8 +30,9 @@ class MissionManager:
         node: Node,
         drone: DroneInterface,
         marker_handler: ArucoMarkerHandler,
-        waypoint_manager: Optional[WaypointManager],
-        uwb_navigator: Optional[UWBNavigator],
+        waypoint_manager: WaypointManager,
+        uwb_navigator: UWBNavigator,
+        waypoint_coordinator: WaypointCoordinator,
         params: ParameterLoader
     ):
         """
@@ -41,8 +42,9 @@ class MissionManager:
             node: ROS2 node for logging
             drone: Drone interface for control and telemetry
             marker_handler: ArUco marker coordination handler
-            waypoint_manager: Waypoint navigation manager (None if disabled)
-            uwb_navigator: UWB-based navigator for waypoint navigation (None if disabled)
+            waypoint_manager: Waypoint navigation manager
+            uwb_navigator: UWB-based navigator for waypoint navigation
+            waypoint_coordinator: Waypoint reservation coordinator
             params: Parameter loader with configuration
         """
         self.node = node
@@ -50,6 +52,7 @@ class MissionManager:
         self.marker_handler = marker_handler
         self.waypoint_manager = waypoint_manager
         self.uwb_navigator = uwb_navigator
+        self.waypoint_coordinator = waypoint_coordinator
         self.params = params
         
         # Shared mission context
@@ -65,7 +68,16 @@ class MissionManager:
         Returns:
             Dictionary mapping MissionState enum to state instance
         """
-        common_args = (self.node, self.drone, self.marker_handler, self.waypoint_manager, self.uwb_navigator, self.params, self.context)
+        common_args = (
+            self.node, 
+            self.drone, 
+            self.marker_handler, 
+            self.waypoint_manager, 
+            self.uwb_navigator,
+            self.waypoint_coordinator,
+            self.params, 
+            self.context
+        )
         
         return {
             MissionState.TAKING_OFF: TakingOffState(*common_args),

@@ -250,7 +250,7 @@ class UWBNavigator:
         
         # Speed scaling: slow down when close
         speed_scale = min(1.0, distance / 2.5)  # Ramp down within 2.5m
-        speed = self.forward_speed * speed_scale
+        speed = self.forward_speed * max(0.1, speed_scale)  # Min 10% speed
         
         self.drone.move_forward(speed)
 
