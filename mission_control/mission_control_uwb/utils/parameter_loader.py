@@ -36,6 +36,8 @@ class ParameterLoader:
         self.node.declare_parameter('waypoint_tolerance_xy', 0.30)
         self.node.declare_parameter('waypoint_tolerance_yaw', 3.0)
         self.node.declare_parameter('waypoint_forward_speed', 1.0)
+        self.node.declare_parameter('waypoint_strafe_speed', 1.0)
+        self.node.declare_parameter('waypoint_yaw_speed', 1.0)
         
         # SEARCHING state parameters
         self.node.declare_parameter('yaw_speed', 0.5)
@@ -94,6 +96,8 @@ class ParameterLoader:
         self.waypoint_tolerance_xy = self.node.get_parameter('waypoint_tolerance_xy').get_parameter_value().double_value
         self.waypoint_tolerance_yaw = self.node.get_parameter('waypoint_tolerance_yaw').get_parameter_value().double_value
         self.waypoint_forward_speed = self.node.get_parameter('waypoint_forward_speed').get_parameter_value().double_value
+        self.waypoint_strafe_speed = self.node.get_parameter('waypoint_strafe_speed').get_parameter_value().double_value
+        self.waypoint_yaw_speed = self.node.get_parameter('waypoint_yaw_speed').get_parameter_value().double_value
         
         # Searching
         self.yaw_speed = self.node.get_parameter('yaw_speed').get_parameter_value().double_value
