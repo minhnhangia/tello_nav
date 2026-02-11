@@ -21,6 +21,7 @@ class TakingOffState(BaseState):
         self.drone.execute_action(
             'takeoff',
             MissionState.ASCENDING,
-            MissionState.TAKING_OFF
+            MissionState.TAKING_OFF,
+            max_retries=1
         )
         return None

@@ -25,7 +25,10 @@ class ApproachingState(BaseState):
             return None
         
         # Determine next state: scan for priority markers if not on one
-        if self.marker_handler.is_locked_on_priority_marker():
+        if (
+            self.marker_handler.is_locked_on_priority_marker() 
+            or self.drone.is_battery_critical()
+        ):
             next_state = MissionState.CAMERA_SWITCHING
         else:
             next_state = MissionState.PRIORITY_SCANNING
