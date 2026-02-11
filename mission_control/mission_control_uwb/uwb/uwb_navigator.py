@@ -172,8 +172,12 @@ class UWBNavigator:
             )
             return NavStatus.SUCCESS
         
-        # Execute based on strategy
-        if self.strategy == "SLIDE":
+        # Execute movement strategy
+        # Use SLIDE for fine approach when close to target - holonomic control
+        # is more precise than turn-then-move when within 2x position tolerance
+        use_slide = self.strategy == "SLIDE" or distance < self.tolerance_xy * 2
+        
+        if use_slide:
             self._execute_slide(error_vector, distance, current_yaw)
         else:
             self._execute_drive(error_vector, distance, current_yaw)
