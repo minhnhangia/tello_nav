@@ -21,6 +21,7 @@ setup(
     entry_points={
         'console_scripts': [
             'mission_control = mission_control.mission_control_node:main',
+            'mission_control_uwb = mission_control_uwb.mission_control_uwb_node:main',
         ],
     },
 )

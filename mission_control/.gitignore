@@ -1,0 +1,10 @@
+build/
+install/
+log/
+
+.vscode/
+.colcon_cache/
+.colcon_metadata/
+
+**/__pycache__/
+*.pyc
