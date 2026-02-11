@@ -207,13 +207,13 @@ class UWBNavigator:
         direction = body_error / distance
         
         # Apply speed scaling based on distance (slow down when close)
-        speed_scale = min(1.0, distance / 1.0)  # Ramp down within 1m
-        speed = self.strafe_speed * speed_scale
+        speed_scale = min(1.0, distance / 2.5)  # Ramp down within 2.5m
+        speed = self.strafe_speed * max(0.1, speed_scale)  # Min 10% speed
         
-        # Issue velocity command (x=forward, y=left in body frame)
+        # Issue velocity command (x=forward, y=right in body frame)
         self.drone.move(
             x=float(direction[0] * speed),
-            y=float(direction[1] * speed)
+            y=float(direction[1] * -speed)
         )
         self._phase = NavPhase.MOVING
 
@@ -243,8 +243,8 @@ class UWBNavigator:
             
             # Proportional yaw rate (faster for larger errors, min threshold)
             yaw_rate = self.yaw_speed * np.sign(yaw_error)
-            if abs(yaw_error) < 20:  # Slow down for fine alignment
-                yaw_rate *= abs(yaw_error) / 20.0
+            yaw_rate_scale = min(1.0, abs(yaw_error) / 90.0)  # Slow down within 90deg
+            yaw_rate = yaw_rate * max(0,1, yaw_rate_scale)  # Min 10% speed
             
             self.drone.move(yaw=yaw_rate)
             return
@@ -324,7 +324,7 @@ class UWBNavigator:
         """Throttled progress logging."""
         current_time = self.node.get_clock().now().nanoseconds / 1e9
         if current_time - self._last_log_time > 1.0:  # Log every 1s
-            self.node.get_logger().info(
+            self.node.get_logger().debug(
                 f"[NAV] Dist: {distance*100:.1f}cm | "
                 f"Pos: ({pos[0]:.2f}, {pos[1]:.2f}) | "
                 f"Yaw: {yaw}° | Phase: {self._phase.name}"
