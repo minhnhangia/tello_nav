@@ -28,11 +28,17 @@ class WaypointNavigationState(BaseState):
     8. Advances to next waypoint or transitions to SEARCHING when complete
     """
     
-    __slots__ = ('_retry_unavailable_start_time',)
+    __slots__ = (
+        '_retry_unavailable_start_time',
+        '_pending_release_index',
+        '_pending_reserve_index'
+    )
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._retry_unavailable_start_time = None
+        self._pending_release_index = None
+        self._pending_reserve_index = None
     
     def execute(self) -> Optional[MissionState]:
         """
@@ -106,9 +112,6 @@ class WaypointNavigationState(BaseState):
         if status == NavStatus.SUCCESS:
             return self._handle_waypoint_reached()
         
-        if status == NavStatus.BLOCKED:
-            return self._handle_blocked()
-        
         # NavStatus.RUNNING - continue
         return None
     
@@ -142,11 +145,16 @@ class WaypointNavigationState(BaseState):
             )
             return None
         
+        # Track prior reservation so we can release it only after
+        # the next waypoint is successfully reserved.
+        self._set_pending_release(waypoint_index)
+
         # Request reservation (async, non-blocking)
         self.node.get_logger().info(
             f"WAYPOINT_NAVIGATION: Requesting reservation for waypoint {waypoint_index} at ({waypoint.x:.2f}, {waypoint.y:.2f})m"
         )
         
+        self._pending_reserve_index = waypoint_index
         self.waypoint_coordinator.reserve_waypoint_async(
             waypoint_index=waypoint_index,
             callback=self._on_reservation_response
@@ -208,12 +216,14 @@ class WaypointNavigationState(BaseState):
             self.node.get_logger().info(
                 f"WAYPOINT_NAVIGATION: ✓ Reservation granted - starting navigation"
             )
+            self._release_previous_reservation()
             # Navigation will start on next execute() tick
         else:
             self.node.get_logger().warning(
                 f"WAYPOINT_NAVIGATION: ✗ Reservation failed: {message}. "
                 f"Will retry on next tick."
             )
+            self._pending_reserve_index = None
             # Will retry on next execute() tick
     
     def _verify_reservation_valid(self, waypoint_index: int) -> bool:
@@ -240,7 +250,7 @@ class WaypointNavigationState(BaseState):
     def _start_navigation(self, x: float, y: float) -> None:
         """Initialize navigation to waypoint and start timeout timer."""
         self.context.waypoint_nav_start_time = self.node.get_clock().now()
-        self.uwb_navigator.set_goal(x=x, y=y, strategy="DRIVE")
+        self.uwb_navigator.set_goal(x=x, y=y, strategy="SLIDE")
         
         progress = self.waypoint_manager.get_progress_string()
         self.node.get_logger().info(
@@ -271,6 +281,7 @@ class WaypointNavigationState(BaseState):
         # Unreserve current waypoint
         current_index = self.waypoint_manager.current_index
         self.waypoint_coordinator.unreserve_waypoint(current_index)
+        self._pending_release_index = None
         
         # Skip to next waypoint
         if self.waypoint_manager.skip_current():
@@ -282,7 +293,13 @@ class WaypointNavigationState(BaseState):
         return MissionState.SEARCHING
     
     def _handle_waypoint_reached(self) -> Optional[MissionState]:
-        """Handle successful waypoint arrival."""
+        """
+        Handle successful waypoint arrival.
+        
+        Note: Waypoint reservation is intentionally NOT released here.
+        The reservation is maintained during SEARCHING to prevent other drones
+        from navigating to the same waypoint while this drone is scanning.
+        """
         progress = self.waypoint_manager.get_progress_string()
         self.node.get_logger().info(
             f"WAYPOINT_NAVIGATION: Waypoint {progress} reached!"
@@ -292,33 +309,44 @@ class WaypointNavigationState(BaseState):
         self.context.waypoint_nav_start_time = None
         self._retry_unavailable_start_time = None
         
-        # Unreserve current waypoint
-        current_index = self.waypoint_manager.current_index
-        self.waypoint_coordinator.unreserve_waypoint(current_index)
-        
         # Advance to next waypoint
         if self.waypoint_manager.advance():
             return MissionState.SEARCHING  # Proceed to SEARCHING after each waypoint
         
-        # All waypoints complete
+        # All waypoints complete - release final reservation
+        self.waypoint_coordinator.unreserve_current_waypoint()
         self._reset_state()
         return MissionState.LANDING
-    
-    def _handle_blocked(self) -> Optional[MissionState]:
-        """Handle navigation blocked (UWB failure)."""
-        self.node.get_logger().error(
-            "WAYPOINT_NAVIGATION: Blocked (UWB failure) → STANDBY"
-        )
-        
-        # Cancel navigation and unreserve
-        self.uwb_navigator.cancel()
-        current_index = self.waypoint_manager.current_index
-        self.waypoint_coordinator.unreserve_waypoint(current_index)
-        
-        self._reset_state()
-        return MissionState.STANDBY
     
     def _reset_state(self) -> None:
         """Reset state variables for clean exit."""
         self.context.waypoint_nav_start_time = None
         self._retry_unavailable_start_time = None
+        self._pending_release_index = None
+        self._pending_reserve_index = None
+
+    def _set_pending_release(self, target_index: int) -> None:
+        """
+        Capture current reservation so it can be released only after
+        a new waypoint reservation is confirmed.
+        """
+        if self._pending_release_index is not None:
+            return
+        reserved_index = self.waypoint_coordinator.reserved_waypoint_index
+        if reserved_index >= 0 and reserved_index != target_index:
+            self._pending_release_index = reserved_index
+
+    def _release_previous_reservation(self) -> None:
+        """Release prior waypoint reservation after successful new reservation."""
+        if (
+            self._pending_release_index is not None
+            and self._pending_reserve_index is not None
+            and self._pending_release_index != self._pending_reserve_index
+        ):
+            self.node.get_logger().info(
+                f"WAYPOINT_NAVIGATION: Releasing previous waypoint {self._pending_release_index} "
+                f"after reserving {self._pending_reserve_index}"
+            )
+            self.waypoint_coordinator.unreserve_waypoint(self._pending_release_index)
+        self._pending_release_index = None
+        self._pending_reserve_index = None

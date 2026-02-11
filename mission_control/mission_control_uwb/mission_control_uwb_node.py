@@ -134,7 +134,8 @@ class MissionControlUWB(Node):
             tolerance_xy=self.params.waypoint_tolerance_xy,
             tolerance_yaw=self.params.waypoint_tolerance_yaw,
             forward_speed=self.params.waypoint_forward_speed,
-            yaw_speed=self.params.yaw_speed
+            strafe_speed=self.params.waypoint_strafe_speed,
+            yaw_speed=self.params.waypoint_yaw_speed
         )
         self.get_logger().info("UWB Navigator and WaypointCoordinator initialized")
     
@@ -299,7 +300,10 @@ class MissionControlUWB(Node):
             self.marker_handler.renew_marker_reservation()
         
         # Renew waypoint reservation during navigation
-        if self.mission_state == MissionState.WAYPOINT_NAVIGATION:
+        if self.mission_state in [
+            MissionState.WAYPOINT_NAVIGATION,
+            MissionState.SEARCHING
+        ]:
             if self.waypoint_coordinator is not None:
                 self.waypoint_coordinator.renew_waypoint_reservation()
     

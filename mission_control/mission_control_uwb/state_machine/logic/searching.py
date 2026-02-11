@@ -31,7 +31,7 @@ class SearchingState(BaseState):
                 next_state=MissionState.WAYPOINT_NAVIGATION,  # No marker found after full scan
                 fallback_state=MissionState.WAYPOINT_NAVIGATION,  # Timeout - proceed with next waypoint anyways
                 speed=self.params.scanning_yaw_speed,
-                timeout=22.0  # Allow sufficient time for full rotation
+                timeout=25.0  # Allow sufficient time for full rotation
             )
         
         return None  # Wait for yaw completion or ArUco interrupt
