@@ -15,6 +15,7 @@ from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSDurabilityPolicy, QoS
 from aruco_opencv_msgs.msg import ArucoDetection
 from std_msgs.msg import UInt8
 from std_srvs.srv import Trigger
+from yolo_msgs.msg import DroneDetection
 
 from .state_machine import MissionState, MissionManager
 from .controller import DroneInterface
@@ -46,6 +47,9 @@ class MissionControl(Node):
         
         # Initialize ArUco subscriber
         self._setup_aruco_sub()
+
+        # Initialize drone detection subscriber (published by drone_detector_node)
+        self._setup_drone_detected_sub()
         
         # Initialize ArUco marker handler
         self.marker_handler = ArucoMarkerHandler(
@@ -132,6 +136,22 @@ class MissionControl(Node):
             self._aruco_callback,
             qos_profile
         )
+
+    def _setup_drone_detected_sub(self):
+        """Initialize subscriber for drone detection alerts from drone_detector_node."""
+        drone_qos = QoSProfile(
+            reliability=QoSReliabilityPolicy.RELIABLE,
+            durability=QoSDurabilityPolicy.VOLATILE,
+            history=QoSHistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
+        self.drone_detected_sub = self.create_subscription(
+            DroneDetection,
+            'yolo/drone_detected',
+            self._drone_detected_callback,
+            drone_qos,
+        )
+        self.get_logger().info("Subscribed to 'yolo/drone_detected' topic.")
         
     def _publish_mission_state(self):
         """Publish mission state transitions for monitoring dashboards."""
@@ -198,6 +218,42 @@ class MissionControl(Node):
             MissionState.PRECISION_LANDING
         ]:
             self.marker_handler.update_locked_marker_pose(msg)
+
+    def _drone_detected_callback(self, msg: DroneDetection):
+        """Handle drone detection alert from drone_detector_node.
+
+        The ``DroneDetection`` message carries integer position / distance
+        constants plus confidence score and bounding-box area.
+        Only triggers avoidance when in an interruptable flight state.
+        """
+        position_label = (
+            "left" if msg.position == DroneDetection.POSITION_LEFT else "right"
+        )
+        self.get_logger().info(
+            f"Received DroneDetection: position={position_label} "
+            f"score={msg.score:.2f} area={msg.bbox_area:.0f}px² "
+            f"(current state: {self.mission_state.name})"
+        )
+
+        interruptable_states = {
+            MissionState.SEARCHING,
+        }
+
+        if self.mission_state not in interruptable_states:
+            self.get_logger().warning(
+                f"Ignoring drone detection — state {self.mission_state.name} "
+                f"is not interruptable."
+            )
+            return
+
+        self.get_logger().warning(
+            f"DRONE DETECTED at '{position_label}'! Initiating avoidance."
+        )
+
+        self.drone.cancel_yaw()
+        self.mission_manager.context.drone_position = msg.position
+        self.mission_manager.context.drone_avoidance_start_time = None
+        self.mission_state = MissionState.DRONE_DETECTED
     
     def _handle_takeoff_request(self, request, response):
         """Handle takeoff service request."""
