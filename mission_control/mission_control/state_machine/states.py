@@ -22,3 +22,4 @@ class MissionState(Enum):
     COMPLETING_MISSION = 14
     RESETTING = 15
     PRIORITY_SCANNING = 16
+    DRONE_DETECTED = 17
