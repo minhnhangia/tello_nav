@@ -42,6 +42,7 @@ class ParameterLoader:
         self.node.declare_parameter('sideway_speed', 0.12)
         self.node.declare_parameter('corner_tof_threshold', 0.9)
         self.node.declare_parameter('headon_tof_threshold', 0.5)
+        self.node.declare_parameter('search_turn_direction', 'right')
         
         # CENTERING state parameters
         self.node.declare_parameter('centering_threshold_x', 0.12)
@@ -102,6 +103,7 @@ class ParameterLoader:
         self.sideway_speed = self.node.get_parameter('sideway_speed').get_parameter_value().double_value
         self.corner_tof_threshold = self.node.get_parameter('corner_tof_threshold').get_parameter_value().double_value
         self.headon_tof_threshold = self.node.get_parameter('headon_tof_threshold').get_parameter_value().double_value
+        self.search_turn_direction = self.node.get_parameter('search_turn_direction').get_parameter_value().string_value
         
         # Centering
         self.centering_threshold_x = self.node.get_parameter('centering_threshold_x').get_parameter_value().double_value

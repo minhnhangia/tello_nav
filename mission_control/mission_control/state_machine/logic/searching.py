@@ -3,7 +3,11 @@ from typing import Optional
 
 from ..states import MissionState
 from ..base_state import BaseState
+from enum import Enum
 
+class TurnDirection(Enum):
+    LEFT = "left"
+    RIGHT = "right"
 
 class SearchingState(BaseState):
     """Handles autonomous exploration with obstacle avoidance."""
@@ -57,12 +61,7 @@ class SearchingState(BaseState):
             "SEARCHING: Near exit. Turning 90-degree clockwise."
         )
         self.context.is_near_exit = False
-        self.drone.yaw_right_by_angle(
-            90,
-            MissionState.SEARCHING,
-            MissionState.SEARCHING,
-            speed=self.params.yaw_speed
-        )
+        self._yaw_by_angle(90)
 
     def _avoid_obstacle(self, is_left_clearer: bool):
         if is_left_clearer:
@@ -80,21 +79,34 @@ class SearchingState(BaseState):
         self.node.get_logger().warning(
             "SEARCHING: Corner detected. Turning 137-degree clockwise."
         )
-        self.drone.yaw_right_by_angle(
-            137,
-            MissionState.SEARCHING,
-            MissionState.SEARCHING,
-            speed=self.params.yaw_speed
-        )
+        self._yaw_by_angle(137)
 
     def _avoid_headon(self):
         self.node.get_logger().warning(
             "SEARCHING: Head-on obstacle detected. Turning 180-degree clockwise."
         )
-        self.drone.yaw_right_by_angle(
-            180,
-            MissionState.SEARCHING,
-            MissionState.SEARCHING,
-            speed=self.params.yaw_speed
-        )
+        self._yaw_by_angle(180)
 
+    # ------------------------------------------------------------------
+    # Helper
+    # ------------------------------------------------------------------
+
+    def _yaw_by_angle(self, angle: int):
+        """Yaw by angle using configured ROS2 direction parameter."""
+
+        direction = TurnDirection(self.params.search_turn_direction)
+
+        if direction == TurnDirection.RIGHT:
+            self.drone.yaw_right_by_angle(
+                angle,
+                MissionState.SEARCHING,
+                MissionState.SEARCHING,
+                speed=self.params.yaw_speed
+            )
+        else:
+            self.drone.yaw_left_by_angle(
+                angle,
+                MissionState.SEARCHING,
+                MissionState.SEARCHING,
+                speed=self.params.yaw_speed
+            )
