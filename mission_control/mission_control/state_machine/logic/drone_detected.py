@@ -35,12 +35,7 @@ class DroneDetectedState(BaseState):
         """
         position = self.context.drone_position
 
-        # Pick direction: yaw away from where the drone is
-        if position == DroneDetection.POSITION_RIGHT:
-            direction = "left"
-        else:
-            # drone on left (or unknown) → yaw right
-            direction = "right"
+        direction = self._determine_avoidance_direction(position)
 
         self.node.get_logger().warning(
             f"DRONE_DETECTED: Drone at "
@@ -48,6 +43,23 @@ class DroneDetectedState(BaseState):
             f"yawing {direction}"
         )
 
+        self._execute_yaw_manoeuvre(direction)
+        
+        self._reset_context()
+
+        return MissionState.SEARCHING
+
+    def _determine_avoidance_direction(self, position: int) -> str:
+        """Determine which way to yaw based on the detected drone's position."""
+        # Pick direction: yaw away from where the drone is
+        if position == DroneDetection.POSITION_RIGHT:
+            return "left"
+        else:
+            # drone on left (or unknown) → yaw right
+            return "right"
+
+    def _execute_yaw_manoeuvre(self, direction: str) -> None:
+        """Send the yaw command to the flight controller."""
         # --- Send yaw command for a short burst ---
         if direction == "left":
             self.drone.yaw_left_by_angle(
@@ -64,9 +76,9 @@ class DroneDetectedState(BaseState):
             )
             self.node.get_logger().info("DRONE_DETECTED: Turning Right.")
 
+    def _reset_context(self) -> None:
+        """Clear the context flags before transitioning out of the state."""
         # --- Reset context and return to SEARCHING to re-evaluate ---
         self.context.drone_position = -1
         self.context.drone_avoidance_start_time = None
         self.context.drone_avoidance_direction = ""
-
-        return MissionState.SEARCHING
