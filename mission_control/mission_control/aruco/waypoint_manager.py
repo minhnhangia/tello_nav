@@ -63,8 +63,11 @@ class WaypointManager:
         # Current state
         self.current_index = 0
         self.marker_pose: Optional[Pose] = None
+        self.marker_frame_id: str = ""
         # Timeout timer starts when drone begins searching, not when waypoint is created
         self.marker_last_seen_time: Optional[Time] = None
+        # Count consecutive downward-camera detection frames for robust confirmation.
+        self.downward_detection_streak: int = 0
         
         if self.waypoints:
             self.logger.info(
@@ -169,13 +172,23 @@ class WaypointManager:
         for marker in msg.markers:
             if marker.marker_id == current_marker_id:
                 self.marker_pose = marker.pose
+                self.marker_frame_id = msg.header.frame_id
                 self.marker_last_seen_time = self.node.get_clock().now()
                 marker_found = True
                 break
         
+        if marker_found:
+            if msg.header.frame_id == "camera_down_frame":
+                self.downward_detection_streak += 1
+            else:
+                self.downward_detection_streak = 0
+            return
+
         # Clear pose if marker not visible
         if not marker_found:
             self.marker_pose = None
+            self.marker_frame_id = ""
+            self.downward_detection_streak = 0
     
     def get_marker_pose(self) -> Optional[Pose]:
         """
@@ -194,6 +207,23 @@ class WaypointManager:
             True if marker pose is available, False otherwise
         """
         return self.marker_pose is not None
+
+    def is_marker_visible_on_downward_camera(self) -> bool:
+        """
+        Check if the current waypoint marker is visible on the downward camera stream.
+
+        Returns:
+            True only if marker is visible and detection frame_id is "camera_down_frame"
+        """
+        return self.marker_pose is not None and self.marker_frame_id == "camera_down_frame"
+
+    def get_downward_detection_streak(self) -> int:
+        """Get the current consecutive downward-camera detection streak."""
+        return self.downward_detection_streak
+
+    def has_downward_consecutive_detection(self, required_frames: int) -> bool:
+        """Check whether downward-camera marker detection reached required streak."""
+        return self.downward_detection_streak >= max(1, required_frames)
     
     def start_search_timer(self):
         """
@@ -235,7 +265,9 @@ class WaypointManager:
         # Clear marker state for new waypoint
         # Timer will be started when search actually begins (start_search_timer())
         self.marker_pose = None
+        self.marker_frame_id = ""
         self.marker_last_seen_time = None
+        self.downward_detection_streak = 0
         
         if self.current_index < len(self.waypoints):
             next_waypoint = self.waypoints[self.current_index]
@@ -274,7 +306,9 @@ class WaypointManager:
         """
         self.current_index = 0
         self.marker_pose = None
+        self.marker_frame_id = ""
         self.marker_last_seen_time = None
+        self.downward_detection_streak = 0
         self.logger.info("WaypointManager reset to initial state")
     
     def get_waypoint_count(self) -> int:
@@ -294,3 +328,8 @@ class WaypointManager:
             Current index
         """
         return self.current_index
+    
+    def clear_marker_pose(self):
+        self.marker_pose = None
+        self.marker_frame_id = ""
+        self.downward_detection_streak = 0

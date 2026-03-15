@@ -16,8 +16,9 @@ class ParameterLoader:
         """Declare all ROS2 parameters with default values."""
         # Identity parameters
         self.node.declare_parameter('drone_id', 'tello1')
-        self.node.declare_parameter('priority_markers', list(range(9, 15)))
-        self.node.declare_parameter('exit_markers', [])
+        self.node.declare_parameter('priority_markers', list(range(11, 15)))
+        self.node.declare_parameter('special_markers', list(range(21, 25)))
+        self.node.declare_parameter('exit_markers', [50])
         
         # TAKING_OFF state parameters
         self.node.declare_parameter('min_takeoff_height', 0.3)
@@ -31,8 +32,9 @@ class ParameterLoader:
         self.node.declare_parameter('enable_waypoint_navigation', False)
         self.node.declare_parameter('waypoint_timeout_s', 10.0)
         self.node.declare_parameter('waypoint_sequence', [''])
-        self.node.declare_parameter('waypoint_max_approach_dist', 4.0)
+        self.node.declare_parameter('waypoint_max_approach_dist', 2.0)
         self.node.declare_parameter('waypoint_step_approach_dist', 1.0)
+        self.node.declare_parameter('waypoint_downward_detection_frames', 2)
         
         # SEARCHING state parameters
         self.node.declare_parameter('yaw_speed', 0.5)
@@ -72,6 +74,7 @@ class ParameterLoader:
         # Identity
         self.drone_id = self.node.get_parameter('drone_id').get_parameter_value().string_value
         self.priority_markers = set(self.node.get_parameter('priority_markers').get_parameter_value().integer_array_value)
+        self.special_markers = set(self.node.get_parameter('special_markers').get_parameter_value().integer_array_value)
         self.exit_markers = set(self.node.get_parameter('exit_markers').get_parameter_value().integer_array_value)
         
         # Takeoff/Ascending
@@ -87,6 +90,7 @@ class ParameterLoader:
         self.waypoint_timeout = self.node.get_parameter('waypoint_timeout_s').get_parameter_value().double_value
         self.waypoint_max_approach_dist = self.node.get_parameter('waypoint_max_approach_dist').get_parameter_value().double_value
         self.waypoint_step_approach_dist = self.node.get_parameter('waypoint_step_approach_dist').get_parameter_value().double_value
+        self.waypoint_downward_detection_frames = self.node.get_parameter('waypoint_downward_detection_frames').get_parameter_value().integer_value
         
         # Waypoint sequence - raw string array, parsed by WaypointManager
         waypoint_param = self.node.get_parameter('waypoint_sequence')
