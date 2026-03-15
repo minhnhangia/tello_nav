@@ -62,8 +62,8 @@ class WaypointCenteringState(BaseState):
         is_close_enough = forward_dist < self.params.waypoint_max_approach_dist
         
         # --- 1. OBSTACLE AVOIDANCE ---
-        if self._avoid_obstacle_if_needed(depth, x_error):
-            return None
+        # if self._avoid_obstacle_if_needed(depth, x_error):
+        #     return None
         
         # --- 2. YAW CENTERING ---
         if not is_centered:
