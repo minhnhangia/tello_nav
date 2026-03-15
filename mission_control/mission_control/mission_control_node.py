@@ -56,13 +56,13 @@ class MissionControl(Node):
             node=self,
             drone_id=self.params.drone_id,
             priority_markers=self.params.priority_markers,
+            special_markers=self.params.special_markers,
             on_marker_locked_callback=self._on_marker_locked,
             on_marker_lost_callback=self._on_marker_lost
         )
 
         # Initialize Exit Marker Handler
         self.exit_marker_handler = ExitMarkerHandler(
-            priority_markers=set(self.params.priority_markers),
             exit_markers=set(self.params.exit_markers),
         )
         

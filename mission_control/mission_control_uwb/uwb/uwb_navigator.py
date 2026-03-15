@@ -207,7 +207,7 @@ class UWBNavigator:
         direction = body_error / distance
         
         # Apply speed scaling based on distance (slow down when close)
-        speed_scale = min(1.0, distance / 2.5)  # Ramp down within 2.5m
+        speed_scale = min(1.0, distance / 3.0)  # Ramp down within 3.0m
         speed = self.strafe_speed * max(0.1, speed_scale)  # Min 10% speed
         
         # Issue velocity command (x=forward, y=right in body frame)
@@ -244,7 +244,7 @@ class UWBNavigator:
             # Proportional yaw rate (faster for larger errors, min threshold)
             yaw_rate = self.yaw_speed * np.sign(yaw_error)
             yaw_rate_scale = min(1.0, abs(yaw_error) / 90.0)  # Slow down within 90deg
-            yaw_rate = yaw_rate * max(0,1, yaw_rate_scale)  # Min 10% speed
+            yaw_rate = yaw_rate * max(0.1, yaw_rate_scale)  # Min 10% speed
             
             self.drone.move(yaw=yaw_rate)
             return

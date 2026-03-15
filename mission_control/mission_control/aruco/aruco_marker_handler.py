@@ -36,6 +36,7 @@ class ArucoMarkerHandler:
         node: Node,
         drone_id: str,
         priority_markers: Set[int],
+        special_markers: Set[int],
         on_marker_locked_callback: Callable,
         on_marker_lost_callback: Callable
     ):
@@ -53,7 +54,7 @@ class ArucoMarkerHandler:
         self.logger = node.get_logger()
         self.drone_id = drone_id
         self.priority_markers = priority_markers
-        self.cutoff_id = max(priority_markers) + 1
+        self.cutoff_id = max(special_markers) + 1
 
         # Callbacks to notify mission control
         self.on_marker_locked = on_marker_locked_callback

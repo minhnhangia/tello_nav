@@ -33,7 +33,7 @@ class ParameterLoader:
         self.node.declare_parameter('waypoints_file', '')
         
         # UWB Navigator parameters (for waypoint navigation)
-        self.node.declare_parameter('waypoint_tolerance_xy', 0.30)
+        self.node.declare_parameter('waypoint_tolerance_xy', 0.25)
         self.node.declare_parameter('waypoint_tolerance_yaw', 3.0)
         self.node.declare_parameter('waypoint_forward_speed', 1.0)
         self.node.declare_parameter('waypoint_strafe_speed', 1.0)

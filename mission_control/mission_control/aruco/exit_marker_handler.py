@@ -15,19 +15,15 @@ class ExitMarkerHandler:
     
     def __init__(
         self,
-        priority_markers: Set[int],
         exit_markers: Set[int],
     ):
         """
         Initialize the Exit Marker Handler.
         
         Args:
-            priority_markers: Set of high-priority marker IDs
             exit_markers: Set of exit marker IDs
         """
-        self.priority_markers = priority_markers
         self.exit_markers = exit_markers
-        self.cutoff_id = max(priority_markers) + 1
 
     def is_near_exit_marker(self, msg: ArucoDetection) -> bool:
         """
@@ -40,7 +36,7 @@ class ExitMarkerHandler:
             True if near any exit marker, False otherwise.
         """
         for marker in msg.markers:
-            if marker.marker_id >= self.cutoff_id:
+            if marker.marker_id in self.exit_markers:
                 x = marker.pose.position.x
                 y = marker.pose.position.y
                 z = marker.pose.position.z
