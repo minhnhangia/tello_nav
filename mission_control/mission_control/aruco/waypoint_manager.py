@@ -66,6 +66,8 @@ class WaypointManager:
         self.marker_frame_id: str = ""
         # Timeout timer starts when drone begins searching, not when waypoint is created
         self.marker_last_seen_time: Optional[Time] = None
+        # Count consecutive downward-camera detection frames for robust confirmation.
+        self.downward_detection_streak: int = 0
         
         if self.waypoints:
             self.logger.info(
@@ -175,10 +177,18 @@ class WaypointManager:
                 marker_found = True
                 break
         
+        if marker_found:
+            if msg.header.frame_id == "camera_down_frame":
+                self.downward_detection_streak += 1
+            else:
+                self.downward_detection_streak = 0
+            return
+
         # Clear pose if marker not visible
         if not marker_found:
             self.marker_pose = None
             self.marker_frame_id = ""
+            self.downward_detection_streak = 0
     
     def get_marker_pose(self) -> Optional[Pose]:
         """
@@ -206,6 +216,14 @@ class WaypointManager:
             True only if marker is visible and detection frame_id is "camera_down_frame"
         """
         return self.marker_pose is not None and self.marker_frame_id == "camera_down_frame"
+
+    def get_downward_detection_streak(self) -> int:
+        """Get the current consecutive downward-camera detection streak."""
+        return self.downward_detection_streak
+
+    def has_downward_consecutive_detection(self, required_frames: int) -> bool:
+        """Check whether downward-camera marker detection reached required streak."""
+        return self.downward_detection_streak >= max(1, required_frames)
     
     def start_search_timer(self):
         """
@@ -249,6 +267,7 @@ class WaypointManager:
         self.marker_pose = None
         self.marker_frame_id = ""
         self.marker_last_seen_time = None
+        self.downward_detection_streak = 0
         
         if self.current_index < len(self.waypoints):
             next_waypoint = self.waypoints[self.current_index]
@@ -289,6 +308,7 @@ class WaypointManager:
         self.marker_pose = None
         self.marker_frame_id = ""
         self.marker_last_seen_time = None
+        self.downward_detection_streak = 0
         self.logger.info("WaypointManager reset to initial state")
     
     def get_waypoint_count(self) -> int:
@@ -312,3 +332,4 @@ class WaypointManager:
     def clear_marker_pose(self):
         self.marker_pose = None
         self.marker_frame_id = ""
+        self.downward_detection_streak = 0
