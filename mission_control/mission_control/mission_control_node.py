@@ -64,6 +64,7 @@ class MissionControl(Node):
         """Initialize ROS2 service servers."""
         self._setup_takeoff_server()
         self._setup_landing_server()
+        self._setup_motoron_server()
 
     def _init_subscriptions(self):
         """Initialize ROS2 subscriptions."""
@@ -138,6 +139,14 @@ class MissionControl(Node):
             Trigger,
             'land',
             self._handle_landing_request
+        )
+
+    def _setup_motoron_server(self):
+        """Initialize motoron service server."""
+        self.motoron_srv = self.create_service(
+            Trigger,
+            'motoron',
+            self._handle_motoron_request
         )
         
     def _setup_aruco_sub(self):
@@ -308,6 +317,22 @@ class MissionControl(Node):
         self.mission_state = MissionState.LANDING
         response.success = True
         response.message = "Landing initiated."
+        return response
+    
+    def _handle_motoron_request(self, request, response):
+        """Handle motoron service request."""
+        if self.mission_state != MissionState.IDLE:
+            response.success = False
+            response.message = (
+                f"Cannot motor on: Current state is {self.mission_state.name}, not IDLE."
+            )
+            self.get_logger().warning(response.message)
+            return response
+        
+        self.get_logger().info("Motor on requested. Transitioning to MOTOR_ON state.")
+        self.mission_state = MissionState.MOTOR_ON
+        response.success = True
+        response.message = "Motors turned on."
         return response
     
     def _renew_marker_reservation(self):

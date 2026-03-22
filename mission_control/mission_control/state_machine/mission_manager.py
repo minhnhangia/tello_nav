@@ -80,6 +80,7 @@ class MissionManager:
             MissionState.RESETTING: ResettingState(*common_args),
             MissionState.PRIORITY_SCANNING: PriorityScanningState(*common_args),
             MissionState.DRONE_DETECTED: DroneDetectedState(*common_args),
+            MissionState.MOTOR_ON: MotorOnState(*common_args)
         }
     
     def execute_state(self, state: MissionState) -> Optional[MissionState]:

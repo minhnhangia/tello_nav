@@ -21,6 +21,7 @@ from .completing_mission import CompletingMissionState
 from .resetting import ResettingState
 from .priority_scanning import PriorityScanningState
 from .drone_detected import DroneDetectedState
+from .motoron import MotorOnState
 
 __all__ = [
     "TakingOffState",
@@ -39,4 +40,5 @@ __all__ = [
     "ResettingState",
     "PriorityScanningState",
     "DroneDetectedState",
+    "MotorOnState",
 ]
