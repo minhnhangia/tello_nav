@@ -30,28 +30,48 @@ class MissionControl(Node):
     
     def __init__(self):
         super().__init__('mission_control')
+        self._init_params()
+        self._init_drone_interface()
+        self._init_services()
+        self._init_subscriptions()
+        self._init_marker_handlers()
+        self._init_waypoint_navigation()
+        self._init_mission_manager()
+        self._init_state_publisher()
+        self._init_timers()
         
-        # Load parameters
+        self.get_logger().info(
+            f"Mission Control Node started! Current state: {self.mission_state.name}"
+        )
+
+    # ========================================================================
+    # INITIALIZATION HELPERS
+    # ========================================================================
+
+    def _init_params(self):
+        """Load and validate node parameters."""
         self.params = ParameterLoader(self)
-        
-        # Initialize drone interface
+
+    def _init_drone_interface(self):
+        """Initialize drone interface for control and telemetry."""
         self.drone = DroneInterface(
             self,
             self._on_action_success,
             self._on_action_fail
         )
-        
-        # Initialize takeoff and landing service servers
+
+    def _init_services(self):
+        """Initialize ROS2 service servers."""
         self._setup_takeoff_server()
         self._setup_landing_server()
-        
-        # Initialize ArUco subscriber
-        self._setup_aruco_sub()
 
-        # Initialize drone detection subscriber (published by drone_detector_node)
+    def _init_subscriptions(self):
+        """Initialize ROS2 subscriptions."""
+        self._setup_aruco_sub()
         self._setup_drone_detected_sub()
-        
-        # Initialize ArUco marker handler
+
+    def _init_marker_handlers(self):
+        """Initialize ArUco marker and exit marker handlers."""
         self.marker_handler = ArucoMarkerHandler(
             node=self,
             drone_id=self.params.drone_id,
@@ -61,12 +81,12 @@ class MissionControl(Node):
             on_marker_lost_callback=self._on_marker_lost
         )
 
-        # Initialize Exit Marker Handler
         self.exit_marker_handler = ExitMarkerHandler(
             exit_markers=set(self.params.exit_markers),
         )
-        
-        # Initialize waypoint manager
+
+    def _init_waypoint_navigation(self):
+        """Initialize waypoint manager when waypoint navigation is enabled."""
         if self.params.enable_waypoint_navigation:
             self.waypoint_manager = WaypointManager(
                 node=self,
@@ -75,8 +95,9 @@ class MissionControl(Node):
         else:
             self.waypoint_manager = None
             self.get_logger().info("Waypoint navigation disabled")
-        
-        # Initialize mission manager with all dependencies
+
+    def _init_mission_manager(self):
+        """Initialize mission manager with all dependencies."""
         self.mission_manager = MissionManager(
             self,
             self.drone,
@@ -84,9 +105,12 @@ class MissionControl(Node):
             self.waypoint_manager,
             self.params
         )
-        
-        # Current mission state
+
+    def _init_state_publisher(self):
+        """Initialize mission state tracking and publisher."""
         self.mission_state = MissionState.IDLE
+        self._last_published_state = None
+
         state_qos = QoSProfile(
             reliability=QoSReliabilityPolicy.RELIABLE,
             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL,
@@ -94,15 +118,11 @@ class MissionControl(Node):
             depth=1
         )
         self.state_pub = self.create_publisher(UInt8, 'mission_state', state_qos)
-        self._last_published_state = None
-        
-        # Start main control loops
+
+    def _init_timers(self):
+        """Initialize control loop timers."""
         self.main_timer = self.create_timer(0.25, self._main_logic_loop)  # 4 Hz
         self.reservation_timer = self.create_timer(2.0, self._renew_marker_reservation)
-        
-        self.get_logger().info(
-            f"Mission Control Node started! Current state: {self.mission_state.name}"
-        )
     
     def _setup_takeoff_server(self):
         """Initialize takeoff service server."""
